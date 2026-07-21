@@ -1,0 +1,82 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "earthview_visualization_framework": {
+    "scene_configuration": {
+      "projection_model": "localized_spherical_patch",
+      "center_coordinates": {
+        "latitude": 42.55,
+        "longitude": -122.90,
+        "altitude_meters": 15000.0
+      },
+      "camera_behavior": {
+        "mode": "orbital_trackball",
+        "constraints": {
+          "min_pitch_degrees": 15.0,
+          "max_pitch_degrees": 85.0,
+          "min_zoom_meters": 500.0,
+          "max_zoom_meters": 50000.0
+        }
+      }
+    },
+    "terrain_engine": {
+      "displacement_mapping": {
+        "source": "USGS_3DEP_DEM",
+        "vertex_shader_instruction": "texture_sample_and_extrude",
+        "vertical_exaggeration_multiplier": 1.2,
+        "tessellation_level": "dynamic_lod_based_on_camera_distance"
+      }
+    },
+    "layer_compositing_pipeline": [
+      {
+        "layer_index": 0,
+        "layer_type": "base_surface",
+        "data_source": "Sentinel_2_RGB",
+        "blend_mode": "opaque"
+      },
+      {
+        "layer_index": 1,
+        "layer_type": "data_overlay",
+        "data_source": "Prithvi_Burn_Severity",
+        "blend_mode": "multiply",
+        "opacity": 0.6,
+        "color_ramp": "inferno"
+      },
+      {
+        "layer_index": 2,
+        "layer_type": "vector_geometry",
+        "data_source": "NASA_FIRMS_VIIRS",
+        "geometry_style": {
+          "primitive": "point_sprite",
+          "color": "#ff3300",
+          "bloom_effect": true
+        }
+      },
+      {
+        "layer_index": 3,
+        "layer_type": "semantic_mask",
+        "data_source": "SAM_2_Fire_Perimeter",
+        "geometry_style": {
+          "primitive": "line_strip",
+          "color": "#ff0000",
+          "line_width": 3.0,
+          "pulsate_animation": true
+        }
+      }
+    ],
+    "atmospheric_and_environmental_effects": {
+      "lighting_model": "physically_based_rendering",
+      "sun_position": "dynamic_based_on_current_utc",
+      "volumetric_smoke": {
+        "data_source": "SAM_2_Smoke_Mask",
+        "rendering_technique": "raymarching_with_density_accumulation",
+        "base_color": "#dddddd",
+        "absorption_coefficient": 0.4
+      },
+      "fire_illumination": {
+        "technique": "point_light_arrays_at_firms_coordinates",
+        "intensity": 5.0,
+        "falloff_radius_meters": 2000.0
+      }
+    }
+  }
+}
