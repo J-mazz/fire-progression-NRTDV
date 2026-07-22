@@ -14,7 +14,7 @@
   },
   "devDependencies": {
     "@types/emscripten": "^1.38.0",
-    "esbuild": "^0.19.12",
+    "esbuild": "^0.28.1",
     "typescript": "^7.0.2"
   }
 }
