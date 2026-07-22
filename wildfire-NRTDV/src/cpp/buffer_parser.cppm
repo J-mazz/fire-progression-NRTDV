@@ -1,3 +1,4 @@
+// buffer_parser.cppm - FIXED: exports wildfire::buffer_parser namespace
 module;
 #include <vector>
 #include <cstdint>
@@ -6,6 +7,8 @@ module;
 #include "scene_graph_generated.h"
 
 export module wildfire.buffer_parser;
+
+namespace wildfire::buffer_parser {
 
 export bool verify_flatbuffer_payload(const unsigned char* payload_ptr, unsigned int byte_length) {
     if (payload_ptr == nullptr || byte_length == 0u) {
@@ -91,3 +94,5 @@ export bool parse_scene_graph_vertices(const unsigned char* payload_ptr, unsigne
     out_vertices.assign(source_positions, source_positions + total_floats);
     return true;
 }
+
+} // namespace wildfire::buffer_parser

@@ -1,70 +1,33 @@
-import { loadVisualizationManifest } from './config/ManifestLoader.js';
-import { WasmRenderer } from './core/WasmRenderer.js';
-import { connectLayerData } from './network/DataStreamer.js';
-import { buildSceneGraphFromFloatArray } from './core/FlatBufferBuilder.js';
-import { VisualizationManifest, LoadVisualizationManifestOptions } from './types/index.js';
+import createWasm from './wasm_pipeline.js';
+import { autoIngestAll } from './network/DataStreamer.js';
 
-interface AppState {
-  renderer: WasmRenderer | null;
-  manifest: VisualizationManifest | null;
+declare const L:any; // leaflet from script tag
+
+// 1. base map first - so you don't get black
+const map = L.map('map', {zoomControl:false}).setView([42.65, -123.0], 11);
+const osmLayer = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:19}).addTo(map);
+const satLayer = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',{maxZoom:19}).addTo(map);
+satLayer.setOpacity(0);
+
+function setBase(t:string){
+  if(t==='sat'){ osmLayer.setOpacity(0); satLayer.setOpacity(1); }
+  else { osmLayer.setOpacity(1); satLayer.setOpacity(0); }
+  (window as any).Module?._set_basemap?.(t==='sat'?0:1);
 }
+(window as any).setBase = setBase; // <- makes onclick work if you keep it, but we won't need it
+document.getElementById('btnSat')!.onclick = ()=> setBase('sat');
+document.getElementById('btnTopo')!.onclick = ()=> setBase('topo');
 
-const appState: AppState = {
-  renderer: null,
-  manifest: null
-};
-
-export async function initializeApp(manifestPath: string, module: unknown): Promise<{ manifest: VisualizationManifest; renderer: WasmRenderer }> {
-  if (!module || typeof module !== 'object' || !('cwrap' in module)) {
-    throw new Error('Emscripten module instance is required');
-  }
-
-  const wasmModule = module as any;
-  const manifest = await loadVisualizationManifest(manifestPath, {
-    allowedOrigins: [new URL(manifestPath, window.location.href).origin]
-  });
-
-  const renderer = new WasmRenderer(wasmModule, { allowedOrigins: [window.location.origin] });
-  const initialized = renderer.initialize();
-  if (initialized !== 1) {
-    throw new Error('Failed to initialize WASM renderer');
-  }
-
-  appState.renderer = renderer;
-  appState.manifest = manifest;
-
-  const layers = manifest.earthview_visualization_framework.layer_compositing_pipeline ?? [];
-  const manifestOptions: LoadVisualizationManifestOptions = {
-    corsMode: 'cors',
-    credentials: 'omit',
-    allowedOrigins: [window.location.origin]
-  };
-
-  for (const layer of layers) {
-    await connectLayerData(layer, renderer, manifestOptions);
-  }
-
-  return { manifest, renderer };
-}
-
-export async function sendFlatbufferMesh(vertices: number[] | Float32Array): Promise<void> {
-  if (!appState.renderer) {
-    throw new Error('Renderer has not been initialized.');
-  }
-
-  const floatArray = vertices instanceof Float32Array ? vertices : new Float32Array(vertices);
-  const payload = buildSceneGraphFromFloatArray(floatArray);
-  appState.renderer.feedBuffer(payload);
-  appState.renderer.render();
-}
-
-// Expose to browser runtime for compatibility with legacy index.html usage.
-declare global {
-  interface Window {
-    initializeApp?: typeof initializeApp;
-    sendFlatbufferMesh?: typeof sendFlatbufferMesh;
-  }
-}
-
-window.initializeApp = initializeApp;
-window.sendFlatbufferMesh = sendFlatbufferMesh;
+// 2. wasm
+(async()=>{
+  const Module:any = await createWasm();
+  (window as any).Module = Module;
+  const canvas = document.getElementById('glCanvas') as HTMLCanvasElement;
+  const dpr = devicePixelRatio;
+  canvas.width = canvas.clientWidth * dpr;
+  canvas.height = canvas.clientHeight * dpr;
+  Module._initialize_webgl_context(canvas.width, canvas.height);
+  document.getElementById('wasmBadge')!.textContent = 'WASM: ready';
+try{ await autoIngestAll(Module); }catch(e){ console.warn(e); }
+(function loop(){ Module._render_frame(); requestAnimationFrame(loop); })();
+})();

@@ -1,11 +1,14 @@
 {
-  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$schema": "./schemas/earthview-visualization.schema.json",
+  "$id": "https://j-mazz.github.io/fire-progression-NRTDV/manifests/east_evans_creek_visualization.json",
+  "manifest_version": "1.0.0",
+  "manifest_created_utc": "2026-07-21T00:00:00Z",
   "earthview_visualization_framework": {
     "scene_configuration": {
       "projection_model": "localized_spherical_patch",
       "center_coordinates": {
-        "latitude": 42.55,
-        "longitude": -122.90,
+        "latitude": 42.69,
+        "longitude": -122.98,
         "altitude_meters": 15000.0
       },
       "camera_behavior": {
@@ -21,6 +24,9 @@
     "terrain_engine": {
       "displacement_mapping": {
         "source": "USGS_3DEP_DEM",
+        "source_resolution": "1m",
+        "source_url_local": "/data/terrain/usgs_3dep_east_evans.tif",
+        "integrity_sha256": "REPLACE_WITH_SHA256_OF_TIF",
         "vertex_shader_instruction": "texture_sample_and_extrude",
         "vertical_exaggeration_multiplier": 1.2,
         "tessellation_level": "dynamic_lod_based_on_camera_distance"
@@ -31,36 +37,49 @@
         "layer_index": 0,
         "layer_type": "base_surface",
         "data_source": "Sentinel_2_RGB",
-        "blend_mode": "opaque"
+        "data_source_local": "/data/sentinel2/east_evans_2026-07-15_visual.tif",
+        "data_source_type": "raster_cog",
+        "blend_mode": "opaque",
+        "visible": true
       },
       {
         "layer_index": 1,
         "layer_type": "data_overlay",
         "data_source": "Prithvi_Burn_Severity",
+        "data_source_local": "/data/prithvi/burn_severity_2026-07-15.tif",
+        "data_source_type": "raster_cog",
         "blend_mode": "multiply",
         "opacity": 0.6,
-        "color_ramp": "inferno"
+        "color_ramp": "inferno",
+        "visible": true
       },
       {
         "layer_index": 2,
         "layer_type": "vector_geometry",
         "data_source": "NASA_FIRMS_VIIRS",
+        "data_source_local": "/data/firms/firms_2026-07-15.bin",
+        "data_source_type": "flatbuffer_point",
         "geometry_style": {
           "primitive": "point_sprite",
           "color": "#ff3300",
-          "bloom_effect": true
-        }
+          "bloom_effect": true,
+          "max_point_count": 100000
+        },
+        "visible": true
       },
       {
         "layer_index": 3,
         "layer_type": "semantic_mask",
         "data_source": "SAM_2_Fire_Perimeter",
+        "data_source_local": "/data/sam2/fire_perimeter_2026-07-15.bin",
+        "data_source_type": "flatbuffer_linestrip",
         "geometry_style": {
           "primitive": "line_strip",
           "color": "#ff0000",
           "line_width": 3.0,
           "pulsate_animation": true
-        }
+        },
+        "visible": true
       }
     ],
     "atmospheric_and_environmental_effects": {
@@ -68,14 +87,18 @@
       "sun_position": "dynamic_based_on_current_utc",
       "volumetric_smoke": {
         "data_source": "SAM_2_Smoke_Mask",
+        "data_source_local": "/data/sam2/smoke_mask_2026-07-15.bin",
+        "data_source_type": "voxel_density",
         "rendering_technique": "raymarching_with_density_accumulation",
         "base_color": "#dddddd",
-        "absorption_coefficient": 0.4
+        "absorption_coefficient": 0.4,
+        "max_density": 1.0
       },
       "fire_illumination": {
         "technique": "point_light_arrays_at_firms_coordinates",
         "intensity": 5.0,
-        "falloff_radius_meters": 2000.0
+        "falloff_radius_meters": 2000.0,
+        "max_lights": 500
       }
     }
   }

@@ -4,10 +4,10 @@
 
 import * as flatbuffers from 'flatbuffers';
 
-import { VertexBuffer } from '../wildfire/vertex-buffer.js';
+import { VertexBuffer, VertexBufferT } from '../wildfire/vertex-buffer.js';
 
 
-export class SceneGraph {
+export class SceneGraph implements flatbuffers.IUnpackableObject<SceneGraphT> {
   bb: flatbuffers.ByteBuffer|null = null;
   bb_pos = 0;
   __init(i:number, bb:flatbuffers.ByteBuffer):SceneGraph {
@@ -55,5 +55,31 @@ static createSceneGraph(builder:flatbuffers.Builder, verticesOffset:flatbuffers.
   SceneGraph.startSceneGraph(builder);
   SceneGraph.addVertices(builder, verticesOffset);
   return SceneGraph.endSceneGraph(builder);
+}
+
+unpack(): SceneGraphT {
+  return new SceneGraphT(
+    (this.vertices() !== null ? this.vertices()!.unpack() : null)
+  );
+}
+
+
+unpackTo(_o: SceneGraphT): void {
+  _o.vertices = (this.vertices() !== null ? this.vertices()!.unpack() : null);
+}
+}
+
+export class SceneGraphT implements flatbuffers.IGeneratedObject {
+constructor(
+  public vertices: VertexBufferT|null = null
+){}
+
+
+pack(builder:flatbuffers.Builder): flatbuffers.Offset {
+  const vertices = (this.vertices !== null ? this.vertices!.pack(builder) : 0);
+
+  return SceneGraph.createSceneGraph(builder,
+    vertices
+  );
 }
 }

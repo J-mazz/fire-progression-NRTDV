@@ -1,7 +1,7 @@
 import * as flatbuffers from 'flatbuffers';
-import { SceneGraph } from '../../../vendor/wildfire/scene-graph.js';
-import { VertexBuffer } from '../../../vendor/wildfire/vertex-buffer.js';
-import { Vec3 } from '../../../vendor/wildfire/vec3.js';
+import { SceneGraph } from '../../generated/wildfire/scene-graph.js';
+import { VertexBuffer } from '../../generated/wildfire/vertex-buffer.js';
+import { Vec3 } from '../../generated/wildfire/vec3.js';
 
 export function buildSceneGraphFromFloatArray(floatArray: Float32Array): ArrayBuffer {
   const vertexCount = Math.floor(floatArray.length / 3);
@@ -102,3 +102,4 @@ function normalizeJsonPositions(value: unknown[]): Float32Array | null {
 
   return null;
 }
+

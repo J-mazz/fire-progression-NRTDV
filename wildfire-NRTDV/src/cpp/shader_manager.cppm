@@ -1,9 +1,12 @@
+// shader_manager.cppm - FIXED: exports wildfire::shader_manager namespace
 module;
 #include <GLES3/gl3.h>
 #include <cstdlib>
 #include <cstdint>
 
 export module wildfire.shader_manager;
+
+namespace wildfire::shader_manager {
 
 static GLuint compile_shader(GLenum type, const char* source) {
     GLuint shader = glCreateShader(type);
@@ -77,3 +80,5 @@ export GLuint create_shader_program() {
 
     return program;
 }
+
+} // namespace wildfire::shader_manager

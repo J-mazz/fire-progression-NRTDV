@@ -4,10 +4,10 @@
 
 import * as flatbuffers from 'flatbuffers';
 
-import { Vec3 } from '../wildfire/vec3.js';
+import { Vec3, Vec3T } from '../wildfire/vec3.js';
 
 
-export class VertexBuffer {
+export class VertexBuffer implements flatbuffers.IUnpackableObject<VertexBufferT> {
   bb: flatbuffers.ByteBuffer|null = null;
   bb_pos = 0;
   __init(i:number, bb:flatbuffers.ByteBuffer):VertexBuffer {
@@ -74,5 +74,35 @@ static createVertexBuffer(builder:flatbuffers.Builder, vertexCount:number, posit
   VertexBuffer.addVertexCount(builder, vertexCount);
   VertexBuffer.addPositions(builder, positionsOffset);
   return VertexBuffer.endVertexBuffer(builder);
+}
+
+unpack(): VertexBufferT {
+  return new VertexBufferT(
+    this.vertexCount(),
+    this.bb!.createObjList<Vec3, Vec3T>(this.positions.bind(this), this.positionsLength())
+  );
+}
+
+
+unpackTo(_o: VertexBufferT): void {
+  _o.vertexCount = this.vertexCount();
+  _o.positions = this.bb!.createObjList<Vec3, Vec3T>(this.positions.bind(this), this.positionsLength());
+}
+}
+
+export class VertexBufferT implements flatbuffers.IGeneratedObject {
+constructor(
+  public vertexCount: number = 0,
+  public positions: (Vec3T)[] = []
+){}
+
+
+pack(builder:flatbuffers.Builder): flatbuffers.Offset {
+  const positions = VertexBuffer.createPositionsVector(builder, builder.createObjectOffsetList(this.positions));
+
+  return VertexBuffer.createVertexBuffer(builder,
+    this.vertexCount,
+    positions
+  );
 }
 }

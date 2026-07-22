@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html lang="en"><head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>East Evans Creek - NRTDV [WASM]</title>
+<style>
+:root{--bg:#0a0f1a;--panel:#131b2b;--border:#1e2a44;--accent:#ff8c21;--text:#e6edf3;--muted:#8b9bb4}
+*{box-sizing:border-box;margin:0;padding:0} body{font-family:ui-sans-system,sans-serif;background:var(--bg);color:var(--text);height:100vh;display:flex;flex-direction:column;overflow:hidden}
+header{height:52px;background:var(--panel);border-bottom:1px solid var(--border);display:flex;align-items:center;padding:0 16px;gap:12px}
+.badge{background:#1a253d;border:1px solid var(--border);padding:4px 9px;border-radius:999px;font-size:11px;color:var(--muted)}
+#app{flex:1;display:flex} #sidebar{width:360px;background:var(--panel);border-right:1px solid var(--border);padding:16px;overflow-y:auto}
+#glCanvas{flex:1;display:block;background:#060a12} .dropzone{border:1.5px dashed #2a3a5e;border-radius:12px;padding:18px;text-align:center;cursor:pointer;background:#0e1626}
+.btn-primary{background:var(--accent);color:#000;border:0;border-radius:8px;padding:8px 12px;font-weight:700} .btn-ghost{background:#1a253d;color:var(--text);border:1px solid var(--border);border-radius:8px;padding:8px 12px}
+</style>
+</head><body>
+<header><div style="width:8px;height:8px;border-radius:50%;background:#22c55e;box-shadow:0 0 8px #22c55e"></div><h1 style="font-size:13px;font-weight:800;letter-spacing:.05em">EAST EVANS CREEK • WASM</h1>
+<span class="badge" id="wasmBadge">WASM: loading…</span><span class="badge" id="firmsBadge">FIRMS: —</span><span class="badge" id="samBadge">SAM2: —</span>
+<span style="margin-left:auto;font-size:11px;color:var(--muted)">WebGL2 • FlatBuffers • C++20 Modules</span></header>
+<div id="app"><div id="sidebar">
+<h3 style="font-size:11px;color:var(--muted);margin-bottom:10px">KML/KMZ [buffer_parser.cppm]</h3>
+<div class="dropzone" id="dropzone"><strong>Drop KML/KMZ</strong><br><span style="font-size:11px;color:var(--muted)">parsed in WASM for latency</span></div>
+<input type="file" id="fileInput" accept=".kml,.kmz" multiple hidden>
+<h3 style="font-size:11px;color:var(--muted);margin:16px 0 10px">SAM2 MASKS</h3><div id="samInfo" style="font-size:12px;color:var(--muted)">loading dist/data/sam/…</div>
+<input type="range" id="samOpacity" min="0" max="1" step="0.05" value="0.55" style="width:100%;margin-top:8px">
+</div><canvas id="glCanvas"></canvas></div>
+<script type="module" src="./client.js"></script>
+<script type="module">
+// client.js (WasmRenderer.ts) will call these badges:
+fetch('./data/firms/firms_2026-07-15.bin',{method:'HEAD'}).then(r=>{ if(r.ok) firmsBadge.textContent='FIRMS: bin ready'; });
+fetch('./data/sam/sam_2026-07-15.geojson',{method:'HEAD'}).then(r=>{ samBadge.textContent=r.ok?'SAM2: ready':'SAM2: none'; samInfo.textContent=r.ok?'SAM2 masks loaded into scene_graph':'Run build.sh for SAM2'; });
+fetch('./wasm_pipeline.js',{method:'HEAD'}).then(r=>{ if(r.ok) wasmBadge.textContent='WASM: '+ (r.headers.get('content-length')||'15K'); });
+</script>
+</body></html>
