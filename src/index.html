@@ -11,7 +11,10 @@
 <body>
   <main id="map" aria-label="East Evans Creek fire progression map"></main>
 
-  <section class="specifications" aria-labelledby="spec-title">
+  <button id="menu-button" class="menu-toggle" type="button" aria-label="Toggle mission details"
+          aria-expanded="false" aria-controls="specifications-panel" data-state="loading">⋮</button>
+
+  <section id="specifications-panel" class="specifications" aria-labelledby="spec-title" hidden>
     <div class="specifications__heading">
       <div>
         <p class="eyebrow">Near-real-time earth view</p>

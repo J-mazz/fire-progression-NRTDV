@@ -15,10 +15,45 @@ html, body, #map { width: 100%; height: 100%; margin: 0; }
 body { overflow: hidden; background: #081019; color: var(--ink); }
 button, select, input { font: inherit; }
 
+.menu-toggle {
+  position: fixed;
+  z-index: 12;
+  top: 20px;
+  left: 20px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 42px;
+  height: 42px;
+  border: 1px solid var(--line);
+  border-radius: 50%;
+  background: var(--glass-strong);
+  box-shadow: 0 12px 36px rgba(0, 0, 0, 0.35);
+  backdrop-filter: blur(18px) saturate(130%);
+  color: var(--ink);
+  font-size: 1.2rem;
+  line-height: 1;
+  cursor: pointer;
+}
+.menu-toggle:hover { border-color: rgba(255, 255, 255, 0.35); }
+.menu-toggle::after {
+  content: "";
+  position: absolute;
+  top: 3px;
+  right: 3px;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: #fbbf24;
+}
+.menu-toggle[data-state="ready"]::after { background: var(--ready); box-shadow: 0 0 10px rgba(94, 226, 160, 0.7); }
+.menu-toggle[data-state="error"]::after { background: #fb7185; box-shadow: 0 0 10px rgba(251, 113, 133, 0.7); }
+.menu-toggle[aria-expanded="true"] { border-color: rgba(255, 122, 61, 0.6); color: var(--accent); }
+
 .specifications {
   position: fixed;
   z-index: 10;
-  top: 20px;
+  top: 72px;
   left: 20px;
   width: min(390px, calc(100vw - 40px));
   padding: 18px;
@@ -28,6 +63,7 @@ button, select, input { font: inherit; }
   box-shadow: 0 20px 60px rgba(0, 0, 0, 0.32);
   backdrop-filter: blur(18px) saturate(130%);
 }
+.specifications[hidden] { display: none; }
 
 .specifications__heading { display: flex; align-items: start; justify-content: space-between; gap: 14px; }
 .eyebrow { margin: 0 0 4px; color: var(--accent); font-size: 0.68rem; font-weight: 800; letter-spacing: 0.13em; text-transform: uppercase; }
@@ -79,11 +115,12 @@ dd { overflow: hidden; margin: 0; font-size: 0.78rem; text-overflow: ellipsis; w
 .maplibregl-ctrl-group button + button { border-top-color: var(--line); }
 
 @media (max-width: 640px) {
-  .specifications { top: 10px; left: 10px; width: calc(100vw - 20px); padding: 14px; }
+  .menu-toggle { top: 10px; left: 10px; }
+  .specifications { top: 60px; left: 10px; width: calc(100vw - 20px); padding: 14px; }
   .timeline { right: 10px; bottom: 10px; left: 10px; grid-template-columns: auto 1fr auto; gap: 9px; }
   .timeline__speed { display: none; }
   .timeline__button, .timeline__live { min-width: 54px; padding: 0 10px; }
-  .maplibregl-ctrl-top-right { top: 190px; right: 10px; }
+  .maplibregl-ctrl-top-right { top: 10px; right: 10px; }
 }
 
 @media (prefers-reduced-motion: reduce) {

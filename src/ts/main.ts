@@ -14,6 +14,8 @@ const requiredElement = <T extends HTMLElement>(id: string): T => {
 
 const mapController = new MapController('map');
 const statusElement = requiredElement<HTMLSpanElement>('connection-status');
+const menuButton = requiredElement<HTMLButtonElement>('menu-button');
+const specificationsPanel = requiredElement<HTMLElement>('specifications-panel');
 const observedElement = requiredElement<HTMLElement>('spec-observed');
 const freshnessElement = requiredElement<HTMLElement>('spec-freshness');
 const layersElement = requiredElement<HTMLElement>('spec-layers');
@@ -26,6 +28,27 @@ let selectedSnapshotId: string | null = null;
 let liveMode = true;
 let catalogStale = false;
 let playbackTimer: number | null = null;
+
+function setStatus(text: string, state: 'loading' | 'ready' | 'error'): void {
+  statusElement.textContent = text;
+  statusElement.dataset.state = state;
+  menuButton.dataset.state = state;
+}
+
+function setMenuOpen(open: boolean): void {
+  specificationsPanel.hidden = !open;
+  menuButton.setAttribute('aria-expanded', String(open));
+}
+
+menuButton.addEventListener('click', () => setMenuOpen(Boolean(specificationsPanel.hidden)));
+document.addEventListener('keydown', (event) => {
+  if (event.key === 'Escape') setMenuOpen(false);
+});
+document.addEventListener('pointerdown', (event) => {
+  if (specificationsPanel.hidden) return;
+  const target = event.target as Node;
+  if (!specificationsPanel.contains(target) && !menuButton.contains(target)) setMenuOpen(false);
+});
 
 const timeline = new TimelineController({
   onSelect(index) {
@@ -116,10 +139,7 @@ async function selectSnapshotByIndex(index: number): Promise<void> {
     await mapController.renderSnapshot(snapshot);
     errorElement.hidden = true;
     errorElement.textContent = '';
-    if (!catalogStale) {
-      statusElement.textContent = 'Catalog current';
-      statusElement.dataset.state = 'ready';
-    }
+    if (!catalogStale) setStatus('Catalog current', 'ready');
     for (const adjacentIndex of [boundedIndex - 1, boundedIndex + 1]) {
       const adjacent = catalog.snapshots[adjacentIndex];
       if (adjacent) mapController.prefetchSnapshot(adjacent);
@@ -151,8 +171,7 @@ function stopPlayback(): void {
 function showError(message: string): void {
   errorElement.textContent = message;
   errorElement.hidden = false;
-  statusElement.textContent = 'Update degraded';
-  statusElement.dataset.state = 'error';
+  setStatus('Update degraded', 'error');
 }
 
 function applyCatalog(nextCatalog: SnapshotCatalog, meta: { stale: boolean }): void {
@@ -162,8 +181,7 @@ function applyCatalog(nextCatalog: SnapshotCatalog, meta: { stale: boolean }): v
     && catalog.snapshots.length === nextCatalog.snapshots.length;
   catalog = nextCatalog;
   catalogStale = meta.stale;
-  statusElement.textContent = meta.stale ? 'Cached catalog · update failed' : 'Catalog current';
-  statusElement.dataset.state = meta.stale ? 'error' : 'ready';
+  setStatus(meta.stale ? 'Cached catalog · update failed' : 'Catalog current', meta.stale ? 'error' : 'ready');
   if (!meta.stale) {
     errorElement.hidden = true;
     errorElement.textContent = '';
