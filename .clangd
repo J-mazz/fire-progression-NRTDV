@@ -1,0 +1,10 @@
+CompileFlags:
+  Add: [-std=c++26, -fmodules-ts, -xc++, -I src/cpp, -I src/generated]
+  Compiler: /usr/bin/g++-16
+  Remove: [-m64]
+
+Diagnostics:
+  Suppress: ['-Wunknown-warning-option', 'unknown-module']
+
+Index:
+  Background: Build
