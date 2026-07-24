@@ -15,6 +15,7 @@ const requiredElement = <T extends HTMLElement>(id: string): T => {
 const mapController = new MapController('map');
 const statusElement = requiredElement<HTMLSpanElement>('connection-status');
 const menuButton = requiredElement<HTMLButtonElement>('menu-button');
+const terrainButton = requiredElement<HTMLButtonElement>('terrain-button');
 const specificationsPanel = requiredElement<HTMLElement>('specifications-panel');
 const observedElement = requiredElement<HTMLElement>('spec-observed');
 const freshnessElement = requiredElement<HTMLElement>('spec-freshness');
@@ -41,6 +42,23 @@ function setMenuOpen(open: boolean): void {
 }
 
 menuButton.addEventListener('click', () => setMenuOpen(Boolean(specificationsPanel.hidden)));
+
+let terrainBusy = false;
+terrainButton.addEventListener('click', () => {
+  if (terrainBusy) return;
+  terrainBusy = true;
+  const next = terrainButton.getAttribute('aria-pressed') !== 'true';
+  void mapController.setTerrainMode(next)
+    .then((applied) => {
+      terrainButton.setAttribute('aria-pressed', String(applied && next));
+    })
+    .catch((error: unknown) => {
+      showError(`Terrain view failed: ${error instanceof Error ? error.message : String(error)}`);
+    })
+    .finally(() => {
+      terrainBusy = false;
+    });
+});
 document.addEventListener('keydown', (event) => {
   if (event.key === 'Escape') setMenuOpen(false);
 });

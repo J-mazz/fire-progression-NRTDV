@@ -34,7 +34,7 @@ npm test
 
 ### Cloudflare Pages
 
-The production build omits browser source maps, compiles the C++26 Emscripten artifacts as a build check (they stay out of the deployed bundle until the module is wired into the client), validates Pages file limits, checks generated output for local secret values, and copies security/cache rules from `public/_headers`:
+The production build omits browser source maps, includes the C++26 Emscripten artifacts (the geosplat terrain decoder runs in WASM), validates Pages file limits, checks generated output for local secret values, and copies security/cache rules from `public/_headers`:
 
 ```bash
 npm run build:pages

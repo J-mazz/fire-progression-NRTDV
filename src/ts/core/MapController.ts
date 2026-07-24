@@ -1,6 +1,7 @@
 import maplibregl, { GeoJSONSource } from 'maplibre-gl';
 import { kml } from '@tmcw/togeojson';
 import type { Feature, FeatureCollection, Geometry, GeoJsonProperties } from 'geojson';
+import { GeosplatLayer } from './GeosplatLayer';
 import type { EventConfiguration, Snapshot, SnapshotLayer } from '../types';
 import 'maplibre-gl/dist/maplibre-gl.css';
 
@@ -28,6 +29,9 @@ export class MapController {
   private renderRevision = 0;
   private currentSentinelId: string | null = null;
   private lastEventKey: string | null = null;
+  private geosplat: GeosplatLayer | null = null;
+  private geosplatLoading: Promise<GeosplatLayer | null> | null = null;
+  private terrainMode = false;
   private errorHandler: (message: string) => void = () => undefined;
 
   constructor(container: string) {
@@ -139,6 +143,25 @@ export class MapController {
         void this.loadVectorData(layer).catch(() => undefined);
       }
     }
+  }
+
+  async setTerrainMode(enabled: boolean): Promise<boolean> {
+    await this.ready;
+    if (enabled && !this.geosplat) {
+      this.geosplatLoading ??= GeosplatLayer.load(this.errorHandler);
+      this.geosplat = await this.geosplatLoading;
+      if (!this.geosplat) return false;
+      const beforeId = CONTEXT_LINE_LAYERS.find((id) => this.map.getLayer(id));
+      this.map.addLayer(this.geosplat, beforeId);
+    }
+    this.terrainMode = enabled;
+    this.geosplat?.setEnabled(enabled);
+    if (this.map.getLayer(LAYER_SENTINEL)) {
+      // The splats already carry the Sentinel colors; the flat raster would overpaint 3D relief.
+      this.map.setLayoutProperty(LAYER_SENTINEL, 'visibility', enabled ? 'none' : 'visible');
+    }
+    this.map.easeTo({ pitch: enabled ? 60 : 0, duration: 900 });
+    return true;
   }
 
   private installPersistentLayers(): void {
@@ -317,6 +340,7 @@ export class MapController {
     });
     this.map.addLayer({
       id: LAYER_SENTINEL, type: 'raster', source: SOURCE_SENTINEL,
+      layout: { visibility: this.terrainMode ? 'none' : 'visible' },
       paint: {
         'raster-opacity': layer.opacity ?? 0.72,
         'raster-opacity-transition': { duration: 240 }

@@ -127,4 +127,16 @@ assert.doesNotMatch(mapControllerSource, /type: 'circle', source: SOURCE_SAM/, '
 assert.match(mapControllerSource, /id: LAYER_FIRMS, type: 'heatmap', source: SOURCE_FIRMS/, 'VIIRS detections require a flattened thermal field');
 assert.doesNotMatch(mapControllerSource, /type: 'circle', source: SOURCE_FIRMS/, 'VIIRS must not render persistent circle symbols');
 
+const geosplatMeta = JSON.parse(read('public/data/geosplat/meta.json'));
+const geosplatBinary = fs.readFileSync(path.join(root, 'public/data/geosplat/terrain.splat'));
+assert.equal(geosplatBinary.readUInt32LE(0), 0x31505347, 'geosplat binary magic mismatch');
+const geosplatCells = geosplatBinary.readUInt16LE(4) * geosplatBinary.readUInt16LE(6);
+assert.equal(geosplatBinary.length, 16 + geosplatCells * 7, 'geosplat binary section sizes are inconsistent');
+assert.deepEqual(geosplatMeta.bounds, catalog.event.bounds, 'geosplat terrain must cover the event bounds');
+assert.ok(geosplatMeta.maxHeightMeters > geosplatMeta.minHeightMeters, 'geosplat has no relief');
+assert.ok(fs.existsSync(path.join(root, 'dist/wasm/wildfire.js')), 'WASM module missing from build output');
+assert.match(bundle, /wildfire-geosplat/, 'geosplat custom layer was not bundled');
+assert.match(bundle, /geosplat_decode/, 'geosplat WASM decode path was not bundled');
+assert.match(wasmBuild, /geosplat\.cppm/, 'geosplat module missing from the WASM build');
+
 console.log('Build and temporal catalog checks passed.');

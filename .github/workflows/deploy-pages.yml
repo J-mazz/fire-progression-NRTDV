@@ -49,6 +49,9 @@ jobs:
       - name: Audit dependencies
         run: npm audit --audit-level=high
 
+      - name: Build WASM module
+        run: npm run build:wasm
+
       - name: Run tests
         run: npm test
 

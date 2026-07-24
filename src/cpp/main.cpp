@@ -5,6 +5,7 @@
 
 import wildfire.renderer;
 import wildfire.buffer_parser;
+import wildfire.geosplat;
 
 extern "C" {
 
@@ -44,6 +45,31 @@ int ingest_flatbuffer_stream(unsigned char* payload_ptr, unsigned int byte_lengt
 EMSCRIPTEN_KEEPALIVE
 void render_frame() {
     wildfire::renderer::render_frame();
+}
+
+EMSCRIPTEN_KEEPALIVE
+unsigned int geosplat_decode(const unsigned char* data, unsigned int byte_length) {
+    return wildfire::geosplat::decode(data, byte_length);
+}
+
+EMSCRIPTEN_KEEPALIVE
+const float* geosplat_data() {
+    return wildfire::geosplat::instance_data();
+}
+
+EMSCRIPTEN_KEEPALIVE
+unsigned int geosplat_count() {
+    return wildfire::geosplat::splat_count();
+}
+
+EMSCRIPTEN_KEEPALIVE
+unsigned int geosplat_floats_per_splat() {
+    return wildfire::geosplat::kFloatsPerSplat;
+}
+
+EMSCRIPTEN_KEEPALIVE
+void geosplat_release() {
+    wildfire::geosplat::release();
 }
 
 }

@@ -50,6 +50,10 @@ button, select, input { font: inherit; }
 .menu-toggle[data-state="error"]::after { background: #fb7185; box-shadow: 0 0 10px rgba(251, 113, 133, 0.7); }
 .menu-toggle[aria-expanded="true"] { border-color: rgba(255, 122, 61, 0.6); color: var(--accent); }
 
+.terrain-toggle { left: 72px; font-size: 0.78rem; font-weight: 800; letter-spacing: 0.04em; }
+.terrain-toggle::after { content: none; }
+.terrain-toggle[aria-pressed="true"] { border-color: rgba(94, 226, 160, 0.55); color: var(--ready); background: rgba(94, 226, 160, 0.12); }
+
 .specifications {
   position: fixed;
   z-index: 10;
@@ -116,6 +120,7 @@ dd { overflow: hidden; margin: 0; font-size: 0.78rem; text-overflow: ellipsis; w
 
 @media (max-width: 640px) {
   .menu-toggle { top: 10px; left: 10px; }
+  .terrain-toggle { left: 62px; }
   .specifications { top: 60px; left: 10px; width: calc(100vw - 20px); padding: 14px; }
   .timeline { right: 10px; bottom: 10px; left: 10px; grid-template-columns: auto 1fr auto; gap: 9px; }
   .timeline__speed { display: none; }

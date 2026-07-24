@@ -6,9 +6,6 @@ cd "$(dirname "$0")/.."
 npm run build:wasm
 SOURCE_MAPS=0 bash build.sh
 
-# The WASM module has no client consumer yet; compile it for validation but keep it out of the deployed bundle.
-rm -rf dist/wasm
-
 if find dist -type f \( -name '*.map' -o -name 'catalog.config.json' \) -print -quit | grep -q .; then
   echo "Pages build contains private build metadata or source maps" >&2
   exit 1
