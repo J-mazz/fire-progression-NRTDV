@@ -41,6 +41,11 @@ npm run build:pages
 npm run deploy:pages
 ```
 
+`.github/workflows/deploy-pages.yml` validates pull requests and deploys pushes to `main`. Configure these GitHub Actions repository secrets before enabling automatic deployment:
+
+- Repository secret `CLOUDFLARE_API_TOKEN` — scoped to **Account / Cloudflare Pages / Edit**.
+- Repository variable `CLOUDFLARE_ACCOUNT_ID` — the Cloudflare account identifier.
+
 Run every Python pipeline command through uv. For example:
 
 ```bash
