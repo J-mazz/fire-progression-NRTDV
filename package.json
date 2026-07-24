@@ -8,7 +8,7 @@
     "build:pages": "bash tools/build_pages.sh",
     "build:wasm": "bash tools/build_wasm.sh",
     "deploy:pages": "npm run build:pages && wrangler pages deploy dist --project-name fire-progression-nrtdv --branch main",
-    "dev": "bash serve.sh",
+    "dev": "npm run build && uv run python -m http.server 8787 --directory dist",
     "typecheck": "tsc --noEmit",
     "test": "node tests/run_tests.js"
   },
