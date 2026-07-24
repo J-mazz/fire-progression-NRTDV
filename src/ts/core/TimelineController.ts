@@ -31,7 +31,7 @@ export class TimelineController {
 
   select(index: number, snapshot: Snapshot): void {
     this.range.value = String(index);
-    this.label.textContent = `${snapshot.label} · ${snapshot.observedAt}`;
+    this.label.textContent = snapshot.label;
   }
 
   setPlaying(playing: boolean): void {

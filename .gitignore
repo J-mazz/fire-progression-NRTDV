@@ -1,7 +1,98 @@
-node_modules/
-dist/
-src/generated/
+# Secrets and local configuration
+/.env
+/.env.*
+!/.env.example
+!/.env.*.example
+
+# JavaScript dependencies, caches, and reports
+/node_modules/
+/.npm/
+/.pnpm-store/
+/.yarn/
+/.parcel-cache/
+/.vite/
+/coverage/
+/.nyc_output/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Python and uv environments/caches
+/.venv/
+/venv/
+/.cache/
+/.pytest_cache/
+/.mypy_cache/
+/.ruff_cache/
+/.coverage
+/htmlcov/
+*.egg-info/
+__pycache__/
+*.py[cod]
+
+# Toolchains and persistent project-local binaries
+/emsdk/
+/.tools/
+/.models/
+
+# ML exports and compiled inference engines
+*.onnx
+*.onnx.data
+*.safetensors
+*.pt
+*.pth
+*.ckpt
+*.engine
+
+# Build and generated outputs
+/dist/
+/build/
+/public/wasm/
+/src/generated/
+*.o
+*.obj
+*.a
+*.so
+*.dylib
+*.dll
+*.exe
+*.pcm
+*.wasm
+gcm.cache/
+CMakeCache.txt
+CMakeFiles/
+cmake-build-*/
+compile_commands.json
+
+# Atomic pipeline staging and interrupted downloads
+*.next
+*.previous
+*.part
+*.tmp
+*.download
+
+# Logs and runtime state
 *.log
+*.pid
+*.seed
+
+# Editors and operating systems
+/.vscode
+/.idea
+/.claude/
+/.mcp.json
+/.ripgreprc
+/.gitconfig
+/.bash_profile
+/.bashrc
+/.profile
+/.zprofile
+/.zshrc
+*.swp
+*.swo
+*.kate-swp
+*~
 .DS_Store
-.env.local
-emsdk
+Thumbs.db
+Desktop.ini

@@ -1,45 +1,65 @@
-import maplibregl, { GeoJSONSource, LngLatBounds } from 'maplibre-gl';
-import type { FeatureCollection, GeoJsonProperties, Geometry } from 'geojson';
+import maplibregl, { GeoJSONSource } from 'maplibre-gl';
+import { kml } from '@tmcw/togeojson';
+import type { Feature, FeatureCollection, Geometry, GeoJsonProperties } from 'geojson';
 import type { EventConfiguration, Snapshot, SnapshotLayer } from '../types';
 import 'maplibre-gl/dist/maplibre-gl.css';
 
 const EMPTY_COLLECTION: FeatureCollection = { type: 'FeatureCollection', features: [] };
+const SOURCE_SAM = 'sam-fire-body';
+const SOURCE_OPERATIONAL = 'operational-vectors';
+const SOURCE_FIRMS = 'viirs-trail';
+const LAYER_SAM_FILL = 'sam-body-fill';
+const LAYER_SAM_LINE = 'sam-body-outline';
+const LAYER_FIRMS = 'viirs-thermal-field';
+const SOURCE_SENTINEL = 'sentinel-acquisition';
+const LAYER_SENTINEL = 'sentinel-acquisition';
+const CONTEXT_LINE_LAYERS = ['context-roads', 'context-county-borders', 'context-city-limits'];
+const CONTEXT_LABEL_LAYERS = ['context-road-labels', 'context-county-labels', 'context-city-labels', 'context-landscape-labels'];
+const OPERATIONAL_LAYERS = [
+  ...CONTEXT_LINE_LAYERS,
+  ...CONTEXT_LABEL_LAYERS,
+  'operational-fill', 'operational-line', 'operational-points'
+];
 
 export class MapController {
   private readonly map: maplibregl.Map;
   private readonly ready: Promise<void>;
-  private dynamicLayerIds: string[] = [];
-  private dynamicSourceIds: string[] = [];
+  private readonly dataCache = new Map<string, Promise<FeatureCollection>>();
+  private renderRevision = 0;
+  private currentSentinelId: string | null = null;
   private errorHandler: (message: string) => void = () => undefined;
 
   constructor(container: string) {
     this.map = new maplibregl.Map({
       container,
-      center: [-122.98, 42.69],
-      zoom: 10,
+      center: [-122.9109927, 42.6454545],
+      zoom: 9,
       minZoom: 2,
       maxZoom: 19,
       attributionControl: false,
       style: {
         version: 8,
+        glyphs: 'https://tiles.openfreemap.org/fonts/{fontstack}/{range}.pbf',
         sources: {
-          osm: {
+          'world-imagery': {
             type: 'raster',
-            tiles: ['https://tile.openstreetmap.org/{z}/{x}/{y}.png'],
+            tiles: [
+              'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'
+            ],
             tileSize: 256,
             minzoom: 0,
             maxzoom: 19,
-            attribution: '© OpenStreetMap contributors'
+            attribution: 'Earth imagery © Esri and contributors'
           }
         },
-        layers: [{ id: 'osm', type: 'raster', source: 'osm' }]
+        layers: [{ id: 'world-imagery', type: 'raster', source: 'world-imagery' }]
       }
     });
     this.map.addControl(new maplibregl.NavigationControl({ visualizePitch: true }), 'top-right');
     this.map.addControl(new maplibregl.AttributionControl({ compact: true }), 'bottom-right');
     this.map.on('error', (event) => this.errorHandler(event.error?.message ?? 'Map rendering error.'));
     this.ready = new Promise((resolve) => this.map.once('load', () => {
-      this.installUploadedKmlLayers();
+      this.installPersistentLayers();
       resolve();
     }));
   }
@@ -50,8 +70,7 @@ export class MapController {
 
   async setEvent(event: EventConfiguration): Promise<void> {
     await this.ready;
-    this.map.fitBounds(event.bounds, { padding: 72, duration: 700, maxZoom: 12 });
-    const source = this.map.getSource('event-area') as GeoJSONSource | undefined;
+    this.map.fitBounds(event.bounds, { padding: 64, duration: 650, maxZoom: 11 });
     const data: FeatureCollection = {
       type: 'FeatureCollection',
       features: [{
@@ -69,137 +88,351 @@ export class MapController {
         }
       }]
     };
+    const source = this.map.getSource('event-area') as GeoJSONSource | undefined;
     if (source) {
       source.setData(data);
-      return;
+    } else {
+      this.map.addSource('event-area', { type: 'geojson', data });
+      this.map.addLayer({
+        id: 'event-area-outline', type: 'line', source: 'event-area',
+        paint: {
+          'line-color': '#ffd166', 'line-width': 1,
+          'line-dasharray': [2, 4], 'line-opacity': 0.3
+        }
+      });
     }
-    this.map.addSource('event-area', { type: 'geojson', data });
-    this.map.addLayer({
-      id: 'event-area-outline',
-      type: 'line',
-      source: 'event-area',
-      paint: { 'line-color': '#f59e0b', 'line-width': 2, 'line-dasharray': [3, 2], 'line-opacity': 0.75 }
-    });
+    this.raiseOverlays();
   }
 
   async renderSnapshot(snapshot: Snapshot): Promise<void> {
     await this.ready;
-    this.clearDynamicLayers();
+    const revision = ++this.renderRevision;
+    const readyLayers = snapshot.layers.filter((layer) => layer.status === 'ready');
+    const sentinel = readyLayers.find((layer) => layer.kind === 'sentinel-raster');
+    const samLayers = readyLayers.filter((layer) => layer.kind === 'sam-mask');
+    const firmsLayers = readyLayers.filter((layer) => layer.kind === 'firms');
+    const operationalLayers = readyLayers.filter((layer) => layer.kind === 'kml');
+
+    this.setSentinel(sentinel);
+    await Promise.all([
+      this.updateMergedSource(SOURCE_SAM, samLayers, revision),
+      this.updateMergedSource(SOURCE_OPERATIONAL, operationalLayers, revision),
+      this.updateMergedSource(SOURCE_FIRMS, firmsLayers, revision)
+    ]);
+    if (revision !== this.renderRevision) return;
+    this.setOverlayVisibility(SOURCE_SAM, samLayers.length > 0);
+    this.setOverlayVisibility(SOURCE_OPERATIONAL, operationalLayers.length > 0);
+    this.setOverlayVisibility(SOURCE_FIRMS, firmsLayers.length > 0);
+    this.raiseOverlays();
+  }
+
+  prefetchSnapshot(snapshot: Snapshot): void {
     for (const layer of snapshot.layers) {
-      if (layer.status !== 'ready') continue;
-      if (layer.kind === 'sentinel-raster') this.addRasterLayer(layer);
-      else this.addGeoJsonLayer(layer);
+      if (layer.status === 'ready' && layer.url && layer.kind !== 'sentinel-raster') {
+        void this.loadVectorData(layer).catch(() => undefined);
+      }
     }
   }
 
-  async setUploadedKml(data: FeatureCollection<Geometry, GeoJsonProperties>): Promise<void> {
-    await this.ready;
-    const source = this.map.getSource('uploaded-kml') as GeoJSONSource;
-    source.setData(data);
-    const bounds = collectBounds(data);
-    if (!bounds.isEmpty()) this.map.fitBounds(bounds, { padding: 84, duration: 700, maxZoom: 15 });
-  }
-
-  private installUploadedKmlLayers(): void {
-    this.map.addSource('uploaded-kml', { type: 'geojson', data: EMPTY_COLLECTION });
+  private installPersistentLayers(): void {
+    this.map.addSource(SOURCE_SAM, { type: 'geojson', data: EMPTY_COLLECTION });
     this.map.addLayer({
-      id: 'uploaded-kml-fill', type: 'fill', source: 'uploaded-kml',
-      paint: { 'fill-color': '#f97316', 'fill-opacity': 0.22 }
-    });
-    this.map.addLayer({
-      id: 'uploaded-kml-line', type: 'line', source: 'uploaded-kml',
-      paint: { 'line-color': '#fb923c', 'line-width': 3, 'line-opacity': 0.95 }
-    });
-    this.map.addLayer({
-      id: 'uploaded-kml-point', type: 'circle', source: 'uploaded-kml',
-      paint: { 'circle-color': '#fb923c', 'circle-radius': 5, 'circle-stroke-color': '#fff', 'circle-stroke-width': 1 }
-    });
-  }
-
-  private addRasterLayer(layer: SnapshotLayer): void {
-    const sourceId = `snapshot-source-${layer.id}`;
-    const layerId = `snapshot-layer-${layer.id}`;
-    const tiles = layer.tiles ?? (layer.url ? [layer.url] : []);
-    if (tiles.length === 0) return;
-    this.map.addSource(sourceId, {
-      type: 'raster', tiles, tileSize: 256,
-      ...(layer.bounds ? { bounds: layer.bounds } : {}),
-      ...(layer.attribution ? { attribution: layer.attribution } : {})
-    });
-    this.map.addLayer({
-      id: layerId, type: 'raster', source: sourceId,
+      id: LAYER_SAM_FILL, type: 'fill', source: SOURCE_SAM,
+      layout: { visibility: 'none' },
       paint: {
-        'raster-opacity': layer.opacity ?? 0.82,
-        'raster-opacity-transition': { duration: 350 }
+        'fill-color': [
+          'interpolate', ['linear'], ['coalesce', ['get', 'ageHours'], 0],
+          0, '#ff4d20', 168, '#6b1717'
+        ],
+        'fill-opacity': [
+          'interpolate', ['linear'], ['coalesce', ['get', 'ageHours'], 0],
+          0, 0.55, 168, 0.16
+        ],
+        'fill-antialias': true,
+        'fill-opacity-transition': { duration: 180 }
       }
     });
-    this.dynamicSourceIds.push(sourceId);
-    this.dynamicLayerIds.push(layerId);
+    this.map.addLayer({
+      id: LAYER_SAM_LINE, type: 'line', source: SOURCE_SAM,
+      layout: { visibility: 'none', 'line-join': 'round', 'line-cap': 'round' },
+      paint: {
+        'line-color': [
+          'interpolate', ['linear'], ['coalesce', ['get', 'ageHours'], 0],
+          0, '#ffd166', 168, '#8f2020'
+        ],
+        'line-width': [
+          'interpolate', ['linear'], ['coalesce', ['get', 'ageHours'], 0],
+          0, 2.2, 168, 0.8
+        ],
+        'line-opacity': 0.9
+      }
+    });
+
+    this.map.addSource(SOURCE_OPERATIONAL, {
+      type: 'geojson', data: EMPTY_COLLECTION,
+      attribution: '© OpenStreetMap contributors'
+    });
+    this.map.addLayer({
+      id: 'context-roads', type: 'line', source: SOURCE_OPERATIONAL,
+      filter: ['==', ['get', 'contextType'], 'roads'],
+      layout: { visibility: 'none', 'line-join': 'round', 'line-cap': 'round' },
+      paint: {
+        'line-color': '#f4e8c8',
+        'line-width': ['interpolate', ['linear'], ['zoom'], 7, 0.55, 11, 1.4, 15, 3.2],
+        'line-opacity': ['interpolate', ['linear'], ['zoom'], 7, 0.38, 12, 0.78]
+      }
+    });
+    this.map.addLayer({
+      id: 'context-county-borders', type: 'line', source: SOURCE_OPERATIONAL,
+      filter: ['==', ['get', 'contextType'], 'county-borders'],
+      layout: { visibility: 'none', 'line-join': 'round' },
+      paint: {
+        'line-color': '#dbeafe', 'line-width': 1.6,
+        'line-dasharray': [5, 3], 'line-opacity': 0.7
+      }
+    });
+    this.map.addLayer({
+      id: 'context-city-limits', type: 'line', source: SOURCE_OPERATIONAL,
+      filter: ['==', ['get', 'contextType'], 'city-limits'],
+      layout: { visibility: 'none', 'line-join': 'round' },
+      paint: {
+        'line-color': '#fde68a', 'line-width': 1.35,
+        'line-dasharray': [2, 2], 'line-opacity': 0.78
+      }
+    });
+    this.addContextLabelLayer('context-road-labels', 'roads', 'line', 11, '#fff5d6');
+    this.addContextLabelLayer('context-county-labels', 'county-borders', 'line', 7, '#dbeafe');
+    this.addContextLabelLayer('context-city-labels', 'city-limits', 'line', 9, '#fde68a');
+    this.map.addLayer({
+      id: 'context-landscape-labels', type: 'symbol', source: SOURCE_OPERATIONAL,
+      filter: ['==', ['get', 'contextType'], 'landscape-features'],
+      minzoom: 9,
+      layout: {
+        visibility: 'none',
+        'text-field': ['coalesce', ['get', 'name'], ''],
+        'text-font': ['Noto Sans Regular'],
+        'text-size': ['interpolate', ['linear'], ['zoom'], 9, 10, 14, 13],
+        'text-padding': 5,
+        'text-allow-overlap': false
+      },
+      paint: {
+        'text-color': '#d9f99d',
+        'text-halo-color': 'rgba(5, 15, 12, 0.9)',
+        'text-halo-width': 1.35
+      }
+    });
+    this.map.addLayer({
+      id: 'operational-fill', type: 'fill', source: SOURCE_OPERATIONAL,
+      filter: ['any', ['!', ['has', 'contextType']], ['==', ['get', 'contextType'], 'incident-perimeter']],
+      layout: { visibility: 'none' },
+      paint: { 'fill-color': '#f59e0b', 'fill-opacity': 0.2 }
+    });
+    this.map.addLayer({
+      id: 'operational-line', type: 'line', source: SOURCE_OPERATIONAL,
+      filter: ['any', ['!', ['has', 'contextType']], ['==', ['get', 'contextType'], 'incident-perimeter']],
+      layout: { visibility: 'none' },
+      paint: { 'line-color': '#fbbf24', 'line-width': 2.4, 'line-opacity': 0.95 }
+    });
+    this.map.addLayer({
+      id: 'operational-points', type: 'circle', source: SOURCE_OPERATIONAL,
+      filter: ['any', ['!', ['has', 'contextType']], ['==', ['get', 'contextType'], 'incident-perimeter']],
+      layout: { visibility: 'none' },
+      paint: {
+        'circle-color': '#fbbf24', 'circle-radius': 4,
+        'circle-stroke-color': '#fff', 'circle-stroke-width': 1
+      }
+    });
+
+    this.map.addSource(SOURCE_FIRMS, { type: 'geojson', data: EMPTY_COLLECTION });
+    this.map.addLayer({
+      id: LAYER_FIRMS, type: 'heatmap', source: SOURCE_FIRMS,
+      layout: { visibility: 'none' },
+      paint: {
+        'heatmap-weight': [
+          '*',
+          [
+            'interpolate', ['linear'], ['coalesce', ['get', 'frpMw'], 0],
+            0, 0.08,
+            10, 0.3,
+            50, 0.72,
+            200, 1
+          ],
+          [
+            'interpolate', ['linear'], ['coalesce', ['get', 'ageHours'], 0],
+            0, 1,
+            72, 0.55,
+            168, 0.12
+          ]
+        ],
+        'heatmap-intensity': [
+          'interpolate', ['linear'], ['zoom'],
+          7, 0.7,
+          11, 1.25,
+          15, 1.7
+        ],
+        'heatmap-radius': [
+          'interpolate', ['linear'], ['zoom'],
+          7, 7,
+          11, 18,
+          15, 32
+        ],
+        'heatmap-color': [
+          'interpolate', ['linear'], ['heatmap-density'],
+          0, 'rgba(75, 13, 13, 0)',
+          0.15, 'rgba(127, 29, 29, 0.28)',
+          0.35, 'rgba(220, 38, 38, 0.48)',
+          0.58, 'rgba(249, 115, 22, 0.64)',
+          0.8, 'rgba(251, 191, 36, 0.78)',
+          1, 'rgba(255, 245, 180, 0.9)'
+        ],
+        'heatmap-opacity': [
+          'interpolate', ['linear'], ['zoom'],
+          7, 0.72,
+          13, 0.58,
+          17, 0.42
+        ]
+      }
+    });
   }
 
-  private addGeoJsonLayer(layer: SnapshotLayer): void {
-    if (!layer.url) return;
-    const sourceId = `snapshot-source-${layer.id}`;
-    this.map.addSource(sourceId, { type: 'geojson', data: layer.url });
-    this.dynamicSourceIds.push(sourceId);
+  private setSentinel(layer: SnapshotLayer | undefined): void {
+    const desiredId = layer?.id ?? null;
+    if (desiredId === this.currentSentinelId) return;
+    if (this.map.getLayer(LAYER_SENTINEL)) this.map.removeLayer(LAYER_SENTINEL);
+    if (this.map.getSource(SOURCE_SENTINEL)) this.map.removeSource(SOURCE_SENTINEL);
+    this.currentSentinelId = null;
+    if (!layer?.url || !layer.bounds) return;
 
-    if (layer.kind === 'firms') {
-      const id = `snapshot-points-${layer.id}`;
-      this.map.addLayer({
-        id, type: 'circle', source: sourceId,
-        paint: {
-          'circle-color': '#ff3b20', 'circle-radius': 6,
-          'circle-blur': 0.15, 'circle-opacity': layer.opacity ?? 0.9,
-          'circle-stroke-color': '#ffd7c7', 'circle-stroke-width': 1
+    const [west, south, east, north] = layer.bounds;
+    this.map.addSource(SOURCE_SENTINEL, {
+      type: 'image', url: layer.url,
+      coordinates: [[west, north], [east, north], [east, south], [west, south]]
+    });
+    this.map.addLayer({
+      id: LAYER_SENTINEL, type: 'raster', source: SOURCE_SENTINEL,
+      paint: {
+        'raster-opacity': layer.opacity ?? 0.72,
+        'raster-opacity-transition': { duration: 240 }
+      }
+    }, LAYER_SAM_FILL);
+    this.currentSentinelId = desiredId;
+  }
+
+  private async updateMergedSource(sourceId: string, layers: SnapshotLayer[], revision: number): Promise<void> {
+    if (layers.length === 0) {
+      (this.map.getSource(sourceId) as GeoJSONSource).setData(EMPTY_COLLECTION);
+      return;
+    }
+    const collections = await Promise.all(layers.map((layer) => this.loadVectorData(layer)));
+    if (revision !== this.renderRevision) return;
+    const features: Feature<Geometry, GeoJsonProperties>[] = [];
+    collections.forEach((collection, index) => {
+      const layer = layers[index]!;
+      for (const feature of collection.features) {
+        if (!feature.geometry) continue;
+        features.push({
+          ...feature,
+          properties: {
+            ...(feature.properties ?? {}),
+            ageHours: layer.ageHours ?? 0,
+            contextType: layer.contextType,
+            sourceObservedAt: layer.sourceObservedAt,
+            sourceLayerId: layer.id
+          }
+        } as Feature<Geometry, GeoJsonProperties>);
+      }
+    });
+    (this.map.getSource(sourceId) as GeoJSONSource).setData({ type: 'FeatureCollection', features });
+  }
+
+  private loadVectorData(layer: SnapshotLayer): Promise<FeatureCollection> {
+    if (!layer.url) return Promise.resolve(EMPTY_COLLECTION);
+    const cached = this.dataCache.get(layer.url);
+    if (cached) return cached;
+    const pending = fetch(layer.url, { cache: 'no-cache' })
+      .then(async (response) => {
+        if (!response.ok) throw new Error(`Layer request returned ${response.status}: ${layer.url}`);
+        if (layer.kind === 'kml' || layer.format === 'kml') {
+          const documentNode = new DOMParser().parseFromString(await response.text(), 'text/xml');
+          if (documentNode.querySelector('parsererror')) throw new Error(`Invalid KML document: ${layer.url}`);
+          const converted = kml(documentNode, { skipNullGeometry: true });
+          return {
+            type: 'FeatureCollection',
+            features: converted.features.filter((feature) => feature.geometry !== null)
+          } as FeatureCollection;
         }
+        return response.json() as Promise<FeatureCollection>;
+      })
+      .catch((error) => {
+        this.dataCache.delete(layer.url!);
+        throw error;
       });
-      this.dynamicLayerIds.push(id);
-      return;
-    }
+    this.dataCache.set(layer.url, pending);
+    return pending;
+  }
 
-    const fillId = `snapshot-fill-${layer.id}`;
-    const lineId = `snapshot-line-${layer.id}`;
+  private setOverlayVisibility(sourceId: string, visible: boolean): void {
+    const visibility = visible ? 'visible' : 'none';
+    const layerIds = sourceId === SOURCE_SAM
+      ? [LAYER_SAM_FILL, LAYER_SAM_LINE]
+      : sourceId === SOURCE_OPERATIONAL
+        ? OPERATIONAL_LAYERS
+        : [LAYER_FIRMS];
+    for (const id of layerIds) this.map.setLayoutProperty(id, 'visibility', visibility);
+  }
+
+  private raiseOverlays(): void {
+    const ordered = [
+      ...CONTEXT_LINE_LAYERS,
+      LAYER_FIRMS,
+      LAYER_SAM_FILL, LAYER_SAM_LINE,
+      ...CONTEXT_LABEL_LAYERS,
+      'operational-fill', 'operational-line', 'operational-points',
+      'event-area-outline'
+    ];
+    for (const id of ordered) if (this.map.getLayer(id)) this.map.moveLayer(id);
+    this.assertOverlaysAboveRasters();
+  }
+
+  private assertOverlaysAboveRasters(): void {
+    const styleLayers = this.map.getStyle().layers;
+    const highestRasterIndex = styleLayers.reduce(
+      (highest, layer, index) => layer.type === 'raster' ? Math.max(highest, index) : highest,
+      -1
+    );
+    const hiddenOverlay = [...CONTEXT_LINE_LAYERS, LAYER_FIRMS, LAYER_SAM_FILL, LAYER_SAM_LINE, 'event-area-outline']
+      .find((id) => {
+        const index = styleLayers.findIndex((layer) => layer.id === id);
+        return index >= 0 && index <= highestRasterIndex;
+      });
+    if (hiddenOverlay) throw new Error(`Overlay ${hiddenOverlay} is below a raster layer.`);
+  }
+
+  private addContextLabelLayer(
+    id: string,
+    contextType: string,
+    placement: 'line' | 'point',
+    minzoom: number,
+    color: string
+  ): void {
     this.map.addLayer({
-      id: fillId, type: 'fill', source: sourceId,
+      id, type: 'symbol', source: SOURCE_OPERATIONAL,
+      filter: ['==', ['get', 'contextType'], contextType],
+      minzoom,
+      layout: {
+        visibility: 'none',
+        'symbol-placement': placement,
+        'text-field': ['coalesce', ['get', 'name'], ''],
+        'text-font': ['Noto Sans Regular'],
+        'text-size': placement === 'line' ? 10.5 : 11,
+        'text-padding': 6,
+        'text-allow-overlap': false
+      },
       paint: {
-        'fill-color': layer.kind === 'sam-mask' ? '#ef4444' : '#f59e0b',
-        'fill-opacity': layer.opacity ?? 0.32,
-        'fill-opacity-transition': { duration: 350 }
+        'text-color': color,
+        'text-halo-color': 'rgba(8, 12, 18, 0.92)',
+        'text-halo-width': 1.3
       }
     });
-    this.map.addLayer({
-      id: lineId, type: 'line', source: sourceId,
-      paint: {
-        'line-color': layer.kind === 'sam-mask' ? '#ff6b57' : '#fbbf24',
-        'line-width': 2.5, 'line-opacity': 0.95
-      }
-    });
-    this.dynamicLayerIds.push(fillId, lineId);
   }
-
-  private clearDynamicLayers(): void {
-    for (const id of this.dynamicLayerIds.reverse()) if (this.map.getLayer(id)) this.map.removeLayer(id);
-    for (const id of this.dynamicSourceIds.reverse()) if (this.map.getSource(id)) this.map.removeSource(id);
-    this.dynamicLayerIds = [];
-    this.dynamicSourceIds = [];
-  }
-}
-
-function collectBounds(data: FeatureCollection): LngLatBounds {
-  const bounds = new LngLatBounds();
-  const visit = (coordinates: unknown): void => {
-    if (!Array.isArray(coordinates)) return;
-    if (coordinates.length >= 2 && typeof coordinates[0] === 'number' && typeof coordinates[1] === 'number') {
-      bounds.extend([coordinates[0], coordinates[1]]);
-      return;
-    }
-    for (const item of coordinates) visit(item);
-  };
-  for (const feature of data.features) {
-    if (feature.geometry && 'coordinates' in feature.geometry) visit(feature.geometry.coordinates);
-    if (feature.geometry?.type === 'GeometryCollection') {
-      for (const geometry of feature.geometry.geometries) if ('coordinates' in geometry) visit(geometry.coordinates);
-    }
-  }
-  return bounds;
 }

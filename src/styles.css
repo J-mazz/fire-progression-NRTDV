@@ -42,12 +42,11 @@ h1 { margin: 0; font-size: 1.22rem; line-height: 1.2; }
 .spec-grid__wide { grid-column: 1 / -1; }
 dt { margin-bottom: 3px; color: var(--muted); font-size: 0.64rem; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; }
 dd { overflow: hidden; margin: 0; font-size: 0.78rem; text-overflow: ellipsis; white-space: nowrap; }
-.kml-button, .timeline__button, .timeline__live {
+.timeline__button, .timeline__live {
   display: inline-flex; align-items: center; justify-content: center; min-height: 34px; padding: 0 13px;
   border: 1px solid var(--line); border-radius: 999px; background: rgba(255,255,255,0.07); color: var(--ink); cursor: pointer;
 }
-.kml-button { font-size: 0.75rem; font-weight: 700; }
-.kml-button:hover, .timeline button:hover { border-color: rgba(255,255,255,0.35); }
+.timeline button:hover { border-color: rgba(255,255,255,0.35); }
 .error { margin: 12px 0 0; color: #fecdd3; font-size: 0.75rem; line-height: 1.4; }
 
 .timeline {

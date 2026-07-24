@@ -7,6 +7,7 @@ RUN npm ci
 COPY tsconfig.json build.sh ./
 COPY src ./src
 COPY public ./public
+COPY tools ./tools
 RUN npm run build
 
 FROM nginx:1.27-alpine

@@ -21,6 +21,8 @@ npx esbuild src/ts/main.ts \
 
 cp src/index.html dist/index.html
 cp -R public/. dist/
+node tools/generate_catalog.js public/data/catalog.config.json dist/data/catalog.json
+rm -f dist/data/catalog.config.json
 
 echo "Build complete:"
 find dist -maxdepth 2 -type f -printf '  %p (%s bytes)\n' | sort

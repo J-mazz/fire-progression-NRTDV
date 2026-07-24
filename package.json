@@ -4,6 +4,8 @@
   "version": "0.0.1",
   "scripts": {
     "build": "bash build.sh",
+    "build:native": "bash tools/build_native.sh",
+    "build:wasm": "bash tools/build_wasm.sh",
     "dev": "bash serve.sh",
     "typecheck": "tsc --noEmit",
     "test": "node tests/run_tests.js"

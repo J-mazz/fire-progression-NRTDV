@@ -1,9 +1,8 @@
-import { kml } from '@tmcw/togeojson';
-import type { FeatureCollection, Geometry } from 'geojson';
 import { CatalogClient } from './network/CatalogClient';
 import { MapController } from './core/MapController';
 import { TimelineController } from './core/TimelineController';
 import type { Snapshot, SnapshotCatalog } from './types';
+import '../styles.css';
 
 const CATALOG_URL = './data/catalog.json';
 
@@ -19,9 +18,8 @@ const observedElement = requiredElement<HTMLElement>('spec-observed');
 const freshnessElement = requiredElement<HTMLElement>('spec-freshness');
 const layersElement = requiredElement<HTMLElement>('spec-layers');
 const pipelineElement = requiredElement<HTMLElement>('spec-pipeline');
-const kmlElement = requiredElement<HTMLElement>('spec-kml');
+const sourceElement = requiredElement<HTMLElement>('spec-source');
 const errorElement = requiredElement<HTMLElement>('error-message');
-const fileInput = requiredElement<HTMLInputElement>('kml-input');
 
 let catalog: SnapshotCatalog | null = null;
 let selectedSnapshotId: string | null = null;
@@ -40,6 +38,7 @@ const timeline = new TimelineController({
   onGoLive() {
     liveMode = true;
     stopPlayback();
+    timeline.setLive(true);
     if (catalog) void selectSnapshotByIndex(catalog.snapshots.length - 1);
   }
 });
@@ -52,7 +51,11 @@ function formatObservedAt(value: string): string {
   const date = parseDate(value);
   const options: Intl.DateTimeFormatOptions = value.length === 10
     ? { dateStyle: 'medium', timeZone: 'UTC' }
-    : { dateStyle: 'medium', timeStyle: 'short' };
+    : {
+        year: 'numeric', month: 'short', day: 'numeric',
+        hour: '2-digit', minute: '2-digit', hourCycle: 'h23',
+        timeZone: 'UTC', timeZoneName: 'short'
+      };
   return new Intl.DateTimeFormat(undefined, options).format(date);
 }
 
@@ -67,12 +70,28 @@ function renderSpecifications(snapshot: Snapshot): void {
   observedElement.textContent = formatObservedAt(snapshot.observedAt);
   freshnessElement.textContent = describeFreshness(snapshot);
   const readyLayers = snapshot.layers.filter((layer) => layer.status === 'ready');
+  const firmsLayers = snapshot.layers.filter((layer) => layer.kind === 'firms' && layer.status === 'ready');
+  const samLayers = snapshot.layers.filter((layer) => layer.kind === 'sam-mask' && layer.status === 'ready');
+  const firmsLayer = snapshot.layers.find((layer) => layer.kind === 'firms');
+  const otherLayers = readyLayers.filter((layer) => layer.kind !== 'firms' && layer.kind !== 'sam-mask');
+  const summaries = [
+    ...otherLayers.map((layer) => layer.label),
+    ...(samLayers.length > 0 ? [`SAM-2 fire path (${sumFeatures(samLayers).toLocaleString()} polygons · ${samLayers.length} masks)`] : []),
+    ...(firmsLayers.length > 0 ? [`VIIRS thermal field (${sumFeatures(firmsLayers).toLocaleString()} detections · ${firmsLayers.length} passes)`] : [])
+  ];
   layersElement.textContent = readyLayers.length === 0
-    ? 'OSM base only'
-    : readyLayers.map((layer) => layer.label).join(', ');
+    ? 'Global satellite base'
+    : summaries.join(', ');
+  sourceElement.textContent = firmsLayer?.status === 'unavailable' && firmsLayer.statusReason
+    ? firmsLayer.statusReason
+    : `${readyLayers.length} auto-loaded · FIRMS 3h · Sentinel by pass`;
   pipelineElement.textContent = snapshot.status === 'ready'
     ? 'Published'
     : snapshot.status === 'processing' ? 'Processing' : 'Awaiting source data';
+}
+
+function sumFeatures(layers: Snapshot['layers']): number {
+  return layers.reduce((total, layer) => total + (layer.featureCount ?? 0), 0);
 }
 
 async function selectSnapshotByIndex(index: number): Promise<void> {
@@ -88,6 +107,14 @@ async function selectSnapshotByIndex(index: number): Promise<void> {
 
   try {
     await mapController.renderSnapshot(snapshot);
+    errorElement.hidden = true;
+    errorElement.textContent = '';
+    statusElement.textContent = 'Catalog current';
+    statusElement.dataset.state = 'ready';
+    for (const adjacentIndex of [boundedIndex - 1, boundedIndex + 1]) {
+      const adjacent = catalog.snapshots[adjacentIndex];
+      if (adjacent) mapController.prefetchSnapshot(adjacent);
+    }
   } catch (error) {
     showError(error instanceof Error ? error.message : String(error));
   }
@@ -135,27 +162,6 @@ function applyCatalog(nextCatalog: SnapshotCatalog): void {
     : preservedIndex;
   void selectSnapshotByIndex(targetIndex);
 }
-
-fileInput.addEventListener('change', async () => {
-  const file = fileInput.files?.[0];
-  if (!file) return;
-
-  try {
-    const documentNode = new DOMParser().parseFromString(await file.text(), 'text/xml');
-    if (documentNode.querySelector('parsererror')) throw new Error('The selected KML is not valid XML.');
-    const converted = kml(documentNode, { skipNullGeometry: true });
-    const data: FeatureCollection<Geometry> = {
-      type: 'FeatureCollection',
-      features: converted.features.filter((feature) => feature.geometry !== null) as FeatureCollection<Geometry>['features']
-    };
-    await mapController.setUploadedKml(data);
-    kmlElement.textContent = `${file.name} · ${data.features.length} features`;
-  } catch (error) {
-    showError(error instanceof Error ? error.message : String(error));
-  } finally {
-    fileInput.value = '';
-  }
-});
 
 mapController.onError(showError);
 
