@@ -22,6 +22,19 @@
     "endAt": "2026-07-22T21:00:00Z",
     "cadenceHours": 3
   },
+  "app": {
+    "title": "East Evans Creek",
+    "tagline": "Near-real-time earth view",
+    "initialZoom": 9,
+    "baseImagery": {
+      "tiles": [
+        "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"
+      ],
+      "attribution": "Earth imagery © Esri and contributors",
+      "maxzoom": 19
+    },
+    "simplifyToleranceMeters": 15
+  },
   "feeds": {
     "firms": {
       "label": "NASA FIRMS VIIRS",

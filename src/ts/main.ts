@@ -1,7 +1,8 @@
 import { CatalogClient } from './network/CatalogClient';
 import { MapController } from './core/MapController';
 import { TimelineController } from './core/TimelineController';
-import type { Snapshot, SnapshotCatalog } from './types';
+import { SettingsController } from './core/SettingsController';
+import type { FireBootstrap, Snapshot, SnapshotCatalog } from './types';
 import '../styles.css';
 
 const CATALOG_URL = './data/catalog.json';
@@ -12,17 +13,40 @@ const requiredElement = <T extends HTMLElement>(id: string): T => {
   return element as T;
 };
 
-const mapController = new MapController('map');
+function readBootstrap(): FireBootstrap | null {
+  const node = document.getElementById('fire-bootstrap');
+  if (!node?.textContent) return null;
+  try {
+    return JSON.parse(node.textContent) as FireBootstrap;
+  } catch {
+    return null;
+  }
+}
+
+const bootstrap = readBootstrap();
+const mapController = new MapController('map', bootstrap);
 const statusElement = requiredElement<HTMLSpanElement>('connection-status');
 const menuButton = requiredElement<HTMLButtonElement>('menu-button');
 const terrainButton = requiredElement<HTMLButtonElement>('terrain-button');
 const specificationsPanel = requiredElement<HTMLElement>('specifications-panel');
+const titleElement = requiredElement<HTMLElement>('spec-title');
+const taglineElement = requiredElement<HTMLElement>('spec-tagline');
 const observedElement = requiredElement<HTMLElement>('spec-observed');
 const freshnessElement = requiredElement<HTMLElement>('spec-freshness');
 const layersElement = requiredElement<HTMLElement>('spec-layers');
 const pipelineElement = requiredElement<HTMLElement>('spec-pipeline');
 const sourceElement = requiredElement<HTMLElement>('spec-source');
 const errorElement = requiredElement<HTMLElement>('error-message');
+
+function applyBranding(title: string, tagline: string): void {
+  if (title) {
+    titleElement.textContent = title;
+    document.title = title;
+  }
+  if (tagline) taglineElement.textContent = tagline;
+}
+
+if (bootstrap) applyBranding(bootstrap.title, bootstrap.tagline);
 
 let catalog: SnapshotCatalog | null = null;
 let selectedSnapshotId: string | null = null;
@@ -199,6 +223,7 @@ function applyCatalog(nextCatalog: SnapshotCatalog, meta: { stale: boolean }): v
     && catalog.snapshots.length === nextCatalog.snapshots.length;
   catalog = nextCatalog;
   catalogStale = meta.stale;
+  settings.syncCatalog(nextCatalog);
   setStatus(meta.stale ? 'Cached catalog · update failed' : 'Catalog current', meta.stale ? 'error' : 'ready');
   if (!meta.stale) {
     errorElement.hidden = true;
@@ -206,6 +231,10 @@ function applyCatalog(nextCatalog: SnapshotCatalog, meta: { stale: boolean }): v
   }
   if (unchanged) return;
 
+  if (nextCatalog.app) {
+    applyBranding(nextCatalog.app.title, nextCatalog.app.tagline);
+    void mapController.setBaseImagery(nextCatalog.app.baseImagery);
+  }
   void mapController.setEvent(nextCatalog.event);
   timeline.setSnapshots(nextCatalog.snapshots);
 
@@ -221,4 +250,5 @@ function applyCatalog(nextCatalog: SnapshotCatalog, meta: { stale: boolean }): v
 mapController.onError(showError);
 
 const catalogClient = new CatalogClient(CATALOG_URL);
+const settings = new SettingsController(mapController, catalogClient);
 catalogClient.start(applyCatalog, (error) => showError(`Catalog update failed: ${error.message}`));

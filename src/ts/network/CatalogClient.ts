@@ -58,6 +58,7 @@ export class CatalogClient {
   private etag: string | null = null;
   private timer: number | null = null;
   private inFlight = false;
+  private refresh: (() => Promise<void>) | null = null;
 
   constructor(private readonly url: string) {}
 
@@ -83,7 +84,14 @@ export class CatalogClient {
         this.inFlight = false;
       }
     };
+    this.refresh = refresh;
     void refresh();
+  }
+
+  /** Force an immediate poll (skips the ETag no-op after a config write). */
+  refreshNow(): void {
+    this.etag = null;
+    if (this.refresh) void this.refresh();
   }
 
   stop(): void {

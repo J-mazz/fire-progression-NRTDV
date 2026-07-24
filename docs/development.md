@@ -11,6 +11,23 @@ npm test
 
 Run every Python tool through uv, e.g. `uv run python tools/import_firms.py --help`.
 
+`npm run dev` serves the built `dist/` on `http://localhost:8787` via
+`tools/dev_server.js`, which also exposes a **dev-only** config endpoint:
+
+- `GET /api/config` — returns `public/data/catalog.config.json`.
+- `PUT /api/config` — validates `{event, app, timeline}`, merges it into the config
+  (preserving pipeline-populated `feeds`), and regenerates `dist/data/catalog.json`.
+
+## Retargeting to another fire (⋮ → Settings)
+
+The in-app **Settings** tab writes directly to `catalog.config.json` through that
+endpoint. Frame the fire on the map, click **Use current map view**, set the timeline,
+and **Save** — the map re-focuses via the catalog poller. Then run the pipeline
+(FIRMS/SAM-2/geosplat/context, below) so the data layers match the new bounds.
+
+Save is dev-only: the static Pages build strips `catalog.config.json` and has no write
+endpoint, so Settings there is read-only and offers **Copy config JSON** instead.
+
 ## WASM (C++26, Emscripten)
 
 ```bash

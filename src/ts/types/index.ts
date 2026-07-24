@@ -12,6 +12,32 @@ export interface EventConfiguration {
   bounds: Bounds;
 }
 
+export interface BaseImagery {
+  tiles: string[];
+  attribution: string;
+  maxzoom?: number;
+  minzoom?: number;
+  tileSize?: number;
+}
+
+export interface AppConfig {
+  title: string;
+  tagline: string;
+  initialZoom?: number;
+  baseImagery: BaseImagery;
+  simplifyToleranceMeters?: number;
+}
+
+/** Build-time JSON island (`#fire-bootstrap`) so first paint focuses the right fire. */
+export interface FireBootstrap {
+  title: string;
+  tagline: string;
+  center: [longitude: number, latitude: number];
+  initialZoom: number;
+  bounds: Bounds;
+  baseImagery: BaseImagery | null;
+}
+
 export interface SnapshotLayer {
   id: string;
   label: string;
@@ -52,15 +78,18 @@ export interface Snapshot {
   specifications?: SnapshotSpecifications;
 }
 
+export interface TimelineConfig {
+  startAt: string;
+  endAt: string;
+  cadenceHours: number;
+}
+
 export interface SnapshotCatalog {
   version: string;
   updatedAt: string;
   pollIntervalSeconds: number;
   event: EventConfiguration;
-  timeline?: {
-    startAt: string;
-    endAt: string;
-    cadenceHours: number;
-  };
+  app?: AppConfig;
+  timeline?: TimelineConfig;
   snapshots: Snapshot[];
 }

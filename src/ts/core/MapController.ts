@@ -1,9 +1,19 @@
-import maplibregl, { GeoJSONSource } from 'maplibre-gl';
+import maplibregl, { GeoJSONSource, type RasterSourceSpecification } from 'maplibre-gl';
 import { kml } from '@tmcw/togeojson';
 import type { Feature, FeatureCollection, Geometry, GeoJsonProperties } from 'geojson';
 import { GeosplatLayer } from './GeosplatLayer';
-import type { EventConfiguration, Snapshot, SnapshotLayer } from '../types';
+import type { BaseImagery, Bounds, EventConfiguration, FireBootstrap, Snapshot, SnapshotLayer } from '../types';
 import 'maplibre-gl/dist/maplibre-gl.css';
+
+const BASE_SOURCE = 'world-imagery';
+const BASE_LAYER = 'world-imagery';
+const DEFAULT_BASE_IMAGERY: BaseImagery = {
+  tiles: ['https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'],
+  attribution: 'Earth imagery © Esri and contributors',
+  maxzoom: 19
+};
+
+const round5 = (value: number): number => Math.round(value * 1e5) / 1e5;
 
 const EMPTY_COLLECTION: FeatureCollection = { type: 'FeatureCollection', features: [] };
 const SOURCE_SAM = 'sam-fire-body';
@@ -32,32 +42,24 @@ export class MapController {
   private geosplat: GeosplatLayer | null = null;
   private geosplatLoading: Promise<GeosplatLayer | null> | null = null;
   private terrainMode = false;
+  private currentImageryKey: string;
   private errorHandler: (message: string) => void = () => undefined;
 
-  constructor(container: string) {
+  constructor(container: string, bootstrap?: FireBootstrap | null) {
+    const imagery = bootstrap?.baseImagery ?? DEFAULT_BASE_IMAGERY;
+    this.currentImageryKey = imagery.tiles.join('|');
     this.map = new maplibregl.Map({
       container,
-      center: [-122.9109927, 42.6454545],
-      zoom: 9,
+      center: bootstrap?.center ?? [0, 20],
+      zoom: bootstrap?.initialZoom ?? 2,
       minZoom: 2,
       maxZoom: 19,
       attributionControl: false,
       style: {
         version: 8,
         glyphs: 'https://tiles.openfreemap.org/fonts/{fontstack}/{range}.pbf',
-        sources: {
-          'world-imagery': {
-            type: 'raster',
-            tiles: [
-              'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'
-            ],
-            tileSize: 256,
-            minzoom: 0,
-            maxzoom: 19,
-            attribution: 'Earth imagery © Esri and contributors'
-          }
-        },
-        layers: [{ id: 'world-imagery', type: 'raster', source: 'world-imagery' }]
+        sources: { [BASE_SOURCE]: this.imagerySource(imagery) },
+        layers: [{ id: BASE_LAYER, type: 'raster', source: BASE_SOURCE }]
       }
     });
     this.map.addControl(new maplibregl.NavigationControl({ visualizePitch: true }), 'top-right');
@@ -71,6 +73,42 @@ export class MapController {
 
   onError(handler: (message: string) => void): void {
     this.errorHandler = handler;
+  }
+
+  private imagerySource(imagery: BaseImagery): RasterSourceSpecification {
+    return {
+      type: 'raster',
+      tiles: imagery.tiles,
+      tileSize: imagery.tileSize ?? 256,
+      minzoom: imagery.minzoom ?? 0,
+      maxzoom: imagery.maxzoom ?? 19,
+      attribution: imagery.attribution
+    };
+  }
+
+  async setBaseImagery(imagery: BaseImagery): Promise<void> {
+    await this.ready;
+    const key = imagery.tiles.join('|');
+    if (key === this.currentImageryKey) return;
+    this.currentImageryKey = key;
+    if (this.map.getLayer(BASE_LAYER)) this.map.removeLayer(BASE_LAYER);
+    if (this.map.getSource(BASE_SOURCE)) this.map.removeSource(BASE_SOURCE);
+    this.map.addSource(BASE_SOURCE, this.imagerySource(imagery));
+    // Re-insert beneath every existing layer so overlays stay on top.
+    const bottomLayerId = this.map.getStyle().layers[0]?.id;
+    this.map.addLayer({ id: BASE_LAYER, type: 'raster', source: BASE_SOURCE }, bottomLayerId);
+    this.raiseOverlays();
+  }
+
+  /** Current map framing, for the Settings "Use current map view" affordance. */
+  captureView(): { center: [number, number]; bounds: Bounds; zoom: number } {
+    const center = this.map.getCenter();
+    const bounds = this.map.getBounds();
+    return {
+      center: [round5(center.lng), round5(center.lat)],
+      bounds: [round5(bounds.getWest()), round5(bounds.getSouth()), round5(bounds.getEast()), round5(bounds.getNorth())],
+      zoom: Math.round(this.map.getZoom() * 100) / 100
+    };
   }
 
   async setEvent(event: EventConfiguration): Promise<void> {
@@ -331,13 +369,28 @@ export class MapController {
     if (this.map.getLayer(LAYER_SENTINEL)) this.map.removeLayer(LAYER_SENTINEL);
     if (this.map.getSource(SOURCE_SENTINEL)) this.map.removeSource(SOURCE_SENTINEL);
     this.currentSentinelId = null;
-    if (!layer?.url || !layer.bounds) return;
+    if (!layer) return;
 
-    const [west, south, east, north] = layer.bounds;
-    this.map.addSource(SOURCE_SENTINEL, {
-      type: 'image', url: layer.url,
-      coordinates: [[west, north], [east, north], [east, south], [west, south]]
-    });
+    const tiled = layer.format === 'xyz' || (layer.tiles?.length ?? 0) > 0;
+    if (tiled && layer.tiles && layer.tiles.length > 0) {
+      this.map.addSource(SOURCE_SENTINEL, {
+        type: 'raster',
+        tiles: layer.tiles,
+        tileSize: 256,
+        maxzoom: 19,
+        attribution: layer.attribution,
+        ...(layer.bounds ? { bounds: layer.bounds } : {})
+      });
+    } else if (layer.url && layer.bounds) {
+      const [west, south, east, north] = layer.bounds;
+      this.map.addSource(SOURCE_SENTINEL, {
+        type: 'image', url: layer.url,
+        coordinates: [[west, north], [east, north], [east, south], [west, south]]
+      });
+    } else {
+      return;
+    }
+
     this.map.addLayer({
       id: LAYER_SENTINEL, type: 'raster', source: SOURCE_SENTINEL,
       layout: { visibility: this.terrainMode ? 'none' : 'visible' },

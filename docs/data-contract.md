@@ -1,5 +1,21 @@
 # Data contract & pipeline
 
+## Configuration source of truth
+
+`public/data/catalog.config.json` defines the fire once, for both the frontend and
+the pipeline. `tools/generate_catalog.js` expands it into the served
+`public/data/catalog.json`. Top-level blocks:
+
+- `event` — id, name, `startedAt`, `center`, `bounds` (the pipeline's bounding box).
+- `timeline` — `startAt`/`endAt`/`cadenceHours` (a positive divisor of 24).
+- `app` — frontend presentation: `title`, `tagline`, `initialZoom`, `baseImagery`
+  (`tiles`/`attribution`/`maxzoom`), and `simplifyToleranceMeters` (SAM-2 output).
+- `feeds` — per-feed observation lists, populated by the pipeline tools.
+
+The `app` and `event` blocks are carried into `catalog.json`; the frontend reads them
+to brand the page, focus the map, and choose the base imagery. The ⋮ → **Settings**
+form edits `event`/`app`/`timeline` (never `feeds`) — see [development](development.md).
+
 ## Snapshot catalog
 
 `public/data/catalog.json` is the frontend/backend contract. Snapshots are chronological and use source observation times. Coverage starts July 16, 2026 because the NASA FIRMS VIIRS outage prevented reliable detections between the fire's July 10 start and July 16. Feeds per snapshot:
@@ -21,6 +37,11 @@ Acquisition and SAM-2 inference are excluded from `npm run build`; they belong t
 
 ## Production notes
 
-- Replace the public satellite tile endpoint before significant traffic.
-- Publish Sentinel imagery as XYZ tiles rather than whole files.
-- Simplify or tile large SAM-2/KML geometries before serving them.
+- **Base tile endpoint is config-driven** (`app.baseImagery`); the deployed CSP in
+  `dist/_headers` is generated from that host at build (`tools/generate_headers.js`).
+  Still replace the default public Esri endpoint with your own before real traffic.
+- **Sentinel supports XYZ tiles**: a sentinel observation with `format:"xyz"` and a
+  `tiles` array renders as a tiled raster; whole-image `url`+`bounds` remains supported.
+  Prefer tiles over whole PNGs at scale.
+- **SAM-2 geometry is simplified** at publish time (Douglas–Peucker, `app.simplifyToleranceMeters`).
+- **Remaining follow-up:** simplify or tile large KML geometries before serving them.

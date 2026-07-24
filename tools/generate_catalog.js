@@ -131,6 +131,7 @@ const catalog = {
   updatedAt: config.updatedAt,
   pollIntervalSeconds: config.pollIntervalSeconds,
   event: config.event,
+  ...(config.app ? { app: config.app } : {}),
   timeline: config.timeline,
   snapshots
 };

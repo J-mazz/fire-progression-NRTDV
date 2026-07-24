@@ -25,8 +25,10 @@ npx esbuild src/ts/main.ts "${esbuild_args[@]}"
 
 cp src/index.html dist/index.html
 cp -R public/. dist/
+node tools/inject_bootstrap.js public/data/catalog.config.json dist/index.html
 node tools/generate_catalog.js public/data/catalog.config.json dist/data/catalog.json
-rm -f dist/data/catalog.config.json
+node tools/generate_headers.js public/data/catalog.config.json public/_headers.template dist/_headers
+rm -f dist/data/catalog.config.json dist/_headers.template
 
 echo "Build complete:"
 find dist -maxdepth 2 -type f -printf '  %p (%s bytes)\n' | sort

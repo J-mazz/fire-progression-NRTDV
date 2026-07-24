@@ -19,6 +19,27 @@ Coverage begins July 16: a NASA FIRMS VIIRS outage blocked reliable thermal data
 
 Every layer comes from real observations; nothing is fabricated. The map updates itself as new data is published.
 
+The full specification for the fire currently in focus lives in [fire-specs.md](fire-specs.md).
+
+## Focus on a different fire
+
+This app is polymorphous: one deployment can be pointed at any fire by supplying its
+coordinates and timeline. When running locally (`npm run dev`):
+
+1. Frame the fire on the map, then open **⋮ → Settings**.
+2. Enter a name and the timeline, click **Use current map view** to capture the area, and **Save**.
+3. Save writes `public/data/catalog.config.json` and the map re-focuses immediately.
+4. Run the data pipeline (see [Development](docs/development.md)) for the new area so the
+   thermal, Sentinel, SAM-2, and terrain layers are regenerated to match.
+
+The same config file is the single source of truth for both the map and the pipeline.
+
+On the **deployed** site, **Save & rebuild** works for anyone: it calls a small Cloudflare
+Pages Function that fires a GitHub webhook to rebuild and redeploy with the new fire (no
+credentials ever touch the browser). Optionally gate it behind a passphrase. See
+[Deployment](docs/deployment.md). Either way, the map re-focuses immediately; the data
+layers appear once the pipeline has run for the new area.
+
 ## Technical documentation
 
 - [Development](docs/development.md): local setup, WASM/C++26 build, terrain data, KML tooling, SAM-2 processing
