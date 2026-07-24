@@ -4,6 +4,7 @@ interface TimelineCallbacks {
   onSelect(index: number): void;
   onTogglePlayback(): void;
   onGoLive(): void;
+  onSpeedChange(): void;
 }
 
 export class TimelineController {
@@ -17,6 +18,7 @@ export class TimelineController {
     this.range.addEventListener('input', () => callbacks.onSelect(Number(this.range.value)));
     this.playButton.addEventListener('click', callbacks.onTogglePlayback);
     this.liveButton.addEventListener('click', callbacks.onGoLive);
+    this.speed.addEventListener('change', callbacks.onSpeedChange);
   }
 
   get playbackIntervalMs(): number {

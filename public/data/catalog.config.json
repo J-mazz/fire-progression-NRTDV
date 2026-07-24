@@ -124,21 +124,6 @@
       "mode": "carry-forward",
       "observations": [
         {
-          "observedAt": "2026-07-10T19:12:38.081000Z",
-          "url": "./data/sentinel/sentinel-swir-2026-07-10T19-12-38Z.png",
-          "status": "ready",
-          "bounds": [
-            -123.2109927,
-            42.4454545,
-            -122.6109927,
-            42.8454545
-          ],
-          "opacity": 0.68,
-          "cloudCoverPercent": 8.775196,
-          "composite": "B12/B8A/B04",
-          "attribution": "Sentinel-2 L2A via Element 84 Earth Search"
-        },
-        {
           "observedAt": "2026-07-15T19:12:40.131000Z",
           "url": "./data/sentinel/sentinel-swir-2026-07-15T19-12-40Z.png",
           "status": "ready",

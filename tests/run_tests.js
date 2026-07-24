@@ -89,7 +89,7 @@ const sentinelAcquisitions = new Set(catalog.snapshots
   .flatMap((snapshot) => snapshot.layers)
   .filter((layer) => layer.kind === 'sentinel-raster')
   .map((layer) => layer.sourceObservedAt));
-assert.equal(catalogConfig.feeds.sentinel.observations.length, 2, 'expected two archived low-cloud Sentinel acquisitions');
+assert.equal(catalogConfig.feeds.sentinel.observations.length, 1, 'expected only timeline-relevant Sentinel acquisitions to be archived');
 assert.equal(sentinelAcquisitions.size, 1, 'trimmed timeline should carry only the latest pre-window Sentinel acquisition');
 
 const publishedSam2 = catalog.snapshots
@@ -118,7 +118,7 @@ assert.match(mapControllerSource, /context-county-borders/, 'county-border rende
 assert.match(mapControllerSource, /context-city-limits/, 'city-limit rendering is missing');
 assert.match(mapControllerSource, /context-landscape-labels/, 'landscape identity rendering is missing');
 assert.match(mapControllerSource, /dataCache/, 'vector assets must be cached across timeline frames');
-assert.match(mapControllerSource, /updateMergedSource/, 'timeline vectors must use persistent merged sources');
+assert.match(mapControllerSource, /mergeLayerCollections/, 'timeline vectors must use persistent merged sources');
 assert.doesNotMatch(mapControllerSource, /clearDynamicLayers/, 'timeline rendering must not destroy every layer per frame');
 assert.match(mapControllerSource, /LAYER_SAM_FILL = 'sam-body-fill'/, 'SAM-2 solid-body fill is missing');
 assert.match(mapControllerSource, /LAYER_SAM_LINE = 'sam-body-outline'/, 'SAM-2 body outline is missing');

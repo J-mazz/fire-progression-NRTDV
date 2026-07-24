@@ -24,6 +24,7 @@ const errorElement = requiredElement<HTMLElement>('error-message');
 let catalog: SnapshotCatalog | null = null;
 let selectedSnapshotId: string | null = null;
 let liveMode = true;
+let catalogStale = false;
 let playbackTimer: number | null = null;
 
 const timeline = new TimelineController({
@@ -40,6 +41,12 @@ const timeline = new TimelineController({
     stopPlayback();
     timeline.setLive(true);
     if (catalog) void selectSnapshotByIndex(catalog.snapshots.length - 1);
+  },
+  onSpeedChange() {
+    if (playbackTimer !== null) {
+      stopPlayback();
+      startPlayback();
+    }
   }
 });
 
@@ -109,8 +116,10 @@ async function selectSnapshotByIndex(index: number): Promise<void> {
     await mapController.renderSnapshot(snapshot);
     errorElement.hidden = true;
     errorElement.textContent = '';
-    statusElement.textContent = 'Catalog current';
-    statusElement.dataset.state = 'ready';
+    if (!catalogStale) {
+      statusElement.textContent = 'Catalog current';
+      statusElement.dataset.state = 'ready';
+    }
     for (const adjacentIndex of [boundedIndex - 1, boundedIndex + 1]) {
       const adjacent = catalog.snapshots[adjacentIndex];
       if (adjacent) mapController.prefetchSnapshot(adjacent);
@@ -146,13 +155,23 @@ function showError(message: string): void {
   statusElement.dataset.state = 'error';
 }
 
-function applyCatalog(nextCatalog: SnapshotCatalog): void {
+function applyCatalog(nextCatalog: SnapshotCatalog, meta: { stale: boolean }): void {
   const previousSelection = selectedSnapshotId;
+  const unchanged = catalog !== null
+    && catalog.updatedAt === nextCatalog.updatedAt
+    && catalog.snapshots.length === nextCatalog.snapshots.length;
   catalog = nextCatalog;
+  catalogStale = meta.stale;
+  statusElement.textContent = meta.stale ? 'Cached catalog · update failed' : 'Catalog current';
+  statusElement.dataset.state = meta.stale ? 'error' : 'ready';
+  if (!meta.stale) {
+    errorElement.hidden = true;
+    errorElement.textContent = '';
+  }
+  if (unchanged) return;
+
   void mapController.setEvent(nextCatalog.event);
   timeline.setSnapshots(nextCatalog.snapshots);
-  statusElement.textContent = 'Catalog current';
-  statusElement.dataset.state = 'ready';
 
   const preservedIndex = previousSelection
     ? nextCatalog.snapshots.findIndex((snapshot) => snapshot.id === previousSelection)

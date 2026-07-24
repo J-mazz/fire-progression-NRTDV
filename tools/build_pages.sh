@@ -6,6 +6,9 @@ cd "$(dirname "$0")/.."
 npm run build:wasm
 SOURCE_MAPS=0 bash build.sh
 
+# The WASM module has no client consumer yet; compile it for validation but keep it out of the deployed bundle.
+rm -rf dist/wasm
+
 if find dist -type f \( -name '*.map' -o -name 'catalog.config.json' \) -print -quit | grep -q .; then
   echo "Pages build contains private build metadata or source maps" >&2
   exit 1
@@ -25,7 +28,12 @@ fi
 
 if [[ -f .env.local ]]; then
   while IFS='=' read -r name value; do
-    [[ -z "$name" || "$name" == \#* || -z "$value" ]] && continue
+    [[ -z "$name" || "$name" == \#* ]] && continue
+    name="${name#export }"
+    value="${value%$'\r'}"
+    value="${value#\"}"; value="${value%\"}"
+    value="${value#\'}"; value="${value%\'}"
+    [[ -z "$value" ]] && continue
     if grep -R --binary-files=without-match -F "$value" dist >/dev/null 2>&1; then
       echo "Secret-like value from .env.local found in dist: $name" >&2
       exit 1

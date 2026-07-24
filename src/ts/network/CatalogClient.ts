@@ -61,14 +61,14 @@ export class CatalogClient {
 
   constructor(private readonly url: string) {}
 
-  start(onCatalog: (catalog: SnapshotCatalog) => void, onError: (error: Error) => void): void {
+  start(onCatalog: (catalog: SnapshotCatalog, meta: { stale: boolean }) => void, onError: (error: Error) => void): void {
     const refresh = async () => {
       if (this.inFlight) return;
       this.inFlight = true;
       try {
         const catalog = await this.fetchCatalog();
         if (catalog) {
-          onCatalog(catalog);
+          onCatalog(catalog, { stale: false });
           this.schedule(catalog.pollIntervalSeconds * 1_000, refresh);
         } else {
           this.schedule(30_000, refresh);
@@ -77,7 +77,7 @@ export class CatalogClient {
         const normalized = error instanceof Error ? error : new Error(String(error));
         onError(normalized);
         const cached = this.readCache();
-        if (cached) onCatalog(cached);
+        if (cached) onCatalog(cached, { stale: true });
         this.schedule(30_000, refresh);
       } finally {
         this.inFlight = false;

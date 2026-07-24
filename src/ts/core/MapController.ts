@@ -27,6 +27,7 @@ export class MapController {
   private readonly dataCache = new Map<string, Promise<FeatureCollection>>();
   private renderRevision = 0;
   private currentSentinelId: string | null = null;
+  private lastEventKey: string | null = null;
   private errorHandler: (message: string) => void = () => undefined;
 
   constructor(container: string) {
@@ -70,6 +71,9 @@ export class MapController {
 
   async setEvent(event: EventConfiguration): Promise<void> {
     await this.ready;
+    const eventKey = `${event.id}|${event.bounds.join(',')}`;
+    if (eventKey === this.lastEventKey) return;
+    this.lastEventKey = eventKey;
     this.map.fitBounds(event.bounds, { padding: 64, duration: 650, maxZoom: 11 });
     const data: FeatureCollection = {
       type: 'FeatureCollection',
@@ -113,13 +117,16 @@ export class MapController {
     const firmsLayers = readyLayers.filter((layer) => layer.kind === 'firms');
     const operationalLayers = readyLayers.filter((layer) => layer.kind === 'kml');
 
-    this.setSentinel(sentinel);
-    await Promise.all([
-      this.updateMergedSource(SOURCE_SAM, samLayers, revision),
-      this.updateMergedSource(SOURCE_OPERATIONAL, operationalLayers, revision),
-      this.updateMergedSource(SOURCE_FIRMS, firmsLayers, revision)
+    const [samData, operationalData, firmsData] = await Promise.all([
+      this.mergeLayerCollections(samLayers),
+      this.mergeLayerCollections(operationalLayers),
+      this.mergeLayerCollections(firmsLayers)
     ]);
     if (revision !== this.renderRevision) return;
+    this.setSentinel(sentinel);
+    (this.map.getSource(SOURCE_SAM) as GeoJSONSource).setData(samData);
+    (this.map.getSource(SOURCE_OPERATIONAL) as GeoJSONSource).setData(operationalData);
+    (this.map.getSource(SOURCE_FIRMS) as GeoJSONSource).setData(firmsData);
     this.setOverlayVisibility(SOURCE_SAM, samLayers.length > 0);
     this.setOverlayVisibility(SOURCE_OPERATIONAL, operationalLayers.length > 0);
     this.setOverlayVisibility(SOURCE_FIRMS, firmsLayers.length > 0);
@@ -318,13 +325,9 @@ export class MapController {
     this.currentSentinelId = desiredId;
   }
 
-  private async updateMergedSource(sourceId: string, layers: SnapshotLayer[], revision: number): Promise<void> {
-    if (layers.length === 0) {
-      (this.map.getSource(sourceId) as GeoJSONSource).setData(EMPTY_COLLECTION);
-      return;
-    }
+  private async mergeLayerCollections(layers: SnapshotLayer[]): Promise<FeatureCollection> {
+    if (layers.length === 0) return EMPTY_COLLECTION;
     const collections = await Promise.all(layers.map((layer) => this.loadVectorData(layer)));
-    if (revision !== this.renderRevision) return;
     const features: Feature<Geometry, GeoJsonProperties>[] = [];
     collections.forEach((collection, index) => {
       const layer = layers[index]!;
@@ -342,7 +345,7 @@ export class MapController {
         } as Feature<Geometry, GeoJsonProperties>);
       }
     });
-    (this.map.getSource(sourceId) as GeoJSONSource).setData({ type: 'FeatureCollection', features });
+    return { type: 'FeatureCollection', features };
   }
 
   private loadVectorData(layer: SnapshotLayer): Promise<FeatureCollection> {

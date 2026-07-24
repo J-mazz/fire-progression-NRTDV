@@ -19,8 +19,8 @@ void ext_free_wasm_buffer(void* ptr) {
 }
 
 EMSCRIPTEN_KEEPALIVE
-int initialize_webgl_context() {
-    return wildfire::renderer::initialize_webgl_context();
+int initialize_webgl_context(const char* canvas_selector) {
+    return wildfire::renderer::initialize_webgl_context(canvas_selector);
 }
 
 EMSCRIPTEN_KEEPALIVE

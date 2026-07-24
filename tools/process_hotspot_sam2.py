@@ -219,6 +219,14 @@ def main():
     if not groups:
         raise RuntimeError(f"No Sentinel-2 scenes under {args.cloud_max}% cloud cover")
 
+    # Keep only scenes a carry-forward timeline can reach: the latest baseline
+    # at or before timeline start plus every scene inside the timeline window.
+    timeline_start = iso(config["timeline"]["startAt"])
+    baseline = [group for group in groups if group["observedAt"] <= timeline_start]
+    groups = ([baseline[-1]] if baseline else []) + [
+        group for group in groups if group["observedAt"] > timeline_start
+    ]
+
     sentinel_dir = args.public_dir / "sentinel"
     sam_dir = args.public_dir / "sam2"
     sentinel_staging = args.public_dir / "sentinel.next"
