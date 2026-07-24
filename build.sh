@@ -10,14 +10,18 @@ echo "Type-checking frontend..."
 npx tsc --noEmit
 
 echo "Bundling MapLibre application..."
-npx esbuild src/ts/main.ts \
+esbuild_args=(
   --bundle \
   --format=esm \
   --platform=browser \
   --target=es2022 \
   --minify \
-  --sourcemap \
   --outfile=dist/client.js
+)
+if [[ "${SOURCE_MAPS:-1}" == "1" ]]; then
+  esbuild_args+=(--sourcemap)
+fi
+npx esbuild src/ts/main.ts "${esbuild_args[@]}"
 
 cp src/index.html dist/index.html
 cp -R public/. dist/

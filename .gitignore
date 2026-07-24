@@ -78,7 +78,8 @@ compile_commands.json
 *.seed
 
 # Editors and operating systems
-/.vscode
+/.vscode/*
+!/.vscode/mcp.json
 /.idea
 /.claude/
 /.mcp.json

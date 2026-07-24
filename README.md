@@ -32,6 +32,15 @@ The development server runs at `http://localhost:8787`.
 npm test
 ```
 
+### Cloudflare Pages
+
+The production build omits browser source maps, includes the C++26 Emscripten artifacts, validates Pages file limits, checks generated output for local secret values, and copies security/cache rules from `public/_headers`:
+
+```bash
+npm run build:pages
+npm run deploy:pages
+```
+
 Run every Python pipeline command through uv. For example:
 
 ```bash
