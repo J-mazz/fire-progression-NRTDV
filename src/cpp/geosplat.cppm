@@ -41,8 +41,19 @@ export namespace wildfire::geosplat {
         const auto min_height = read_le<float>(data + 8);
         const auto max_height = read_le<float>(data + 12);
         const std::size_t count = static_cast<std::size_t>(grid_w) * grid_h;
-        if (count == 0) return 0;
-        if (length != kHeaderBytes + count * (2 + 3 + 2)) return 0;
+
+        // grid_w * grid_h reaches 2^32 - 2^17 at the u16 maxima, so on a 32-bit
+        // size_t (wasm32) both the payload-size check and the instance
+        // allocation below can wrap. Bound the cell count first, otherwise a
+        // short file with a huge declared grid passes validation and the decode
+        // loop writes past the end of g_instances.
+        constexpr std::size_t kBytesPerCell = 2 + 3 + 2;
+        constexpr std::size_t kMaxCellsForPayload = (SIZE_MAX - kHeaderBytes) / kBytesPerCell;
+        constexpr std::size_t kMaxCellsForInstances = SIZE_MAX / (kFloatsPerSplat * sizeof(float));
+        constexpr std::size_t kMaxCells =
+            kMaxCellsForPayload < kMaxCellsForInstances ? kMaxCellsForPayload : kMaxCellsForInstances;
+        if (count == 0 || count > kMaxCells) return 0;
+        if (length != kHeaderBytes + count * kBytesPerCell) return 0;
 
         const std::uint8_t* heights = data + kHeaderBytes;
         const std::uint8_t* colors = heights + count * 2;

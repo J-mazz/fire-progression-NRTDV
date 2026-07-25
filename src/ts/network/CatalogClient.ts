@@ -1,14 +1,74 @@
+import { CATALOG_FORMAT } from '../types';
 import type { SnapshotCatalog } from '../types';
 
 const CACHE_KEY = 'wildfire-nrtdv:last-catalog';
+const MIN_POLL_MS = 10_000;
+const FALLBACK_POLL_MS = 30_000;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
+function validateFeeds(value: unknown): Set<string> {
+  if (!isRecord(value)) throw new Error('Catalog feeds must be an object.');
+  const feedIds = new Set<string>();
+  for (const [feedId, feed] of Object.entries(value)) {
+    if (!isRecord(feed) || typeof feed.label !== 'string' || typeof feed.kind !== 'string') {
+      throw new Error(`Feed ${feedId} is missing label or kind.`);
+    }
+    feedIds.add(feedId);
+  }
+  return feedIds;
+}
+
+function validateAssets(value: unknown, feedIds: Set<string>): Set<string> {
+  if (!isRecord(value)) throw new Error('Catalog assets must be an object.');
+  const assetIds = new Set<string>();
+  for (const [assetId, asset] of Object.entries(value)) {
+    if (!isRecord(asset) || typeof asset.feedId !== 'string' || typeof asset.status !== 'string') {
+      throw new Error(`Asset ${assetId} is missing feedId or status.`);
+    }
+    if (!feedIds.has(asset.feedId)) {
+      throw new Error(`Asset ${assetId} references unknown feed ${asset.feedId}.`);
+    }
+    if (typeof asset.observedAt !== 'string' || !Number.isFinite(Date.parse(asset.observedAt))) {
+      throw new Error(`Asset ${assetId} has an invalid observedAt.`);
+    }
+    if (asset.status === 'ready' && typeof asset.url !== 'string' && !Array.isArray(asset.tiles)) {
+      throw new Error(`Ready asset ${assetId} must provide url or tiles.`);
+    }
+    assetIds.add(assetId);
+  }
+  return assetIds;
+}
+
+function validateLayerEntry(entry: unknown, snapshotId: string, feedIds: Set<string>, assetIds: Set<string>): void {
+  if (!isRecord(entry)) throw new Error(`Snapshot ${snapshotId} contains an invalid layer entry.`);
+
+  if (typeof entry.ref === 'string') {
+    if (!assetIds.has(entry.ref)) {
+      throw new Error(`Snapshot ${snapshotId} references unknown asset ${entry.ref}.`);
+    }
+    if (typeof entry.ageHours !== 'number' || !Number.isFinite(entry.ageHours) || entry.ageHours < 0) {
+      throw new Error(`Snapshot ${snapshotId} reference ${entry.ref} needs a non-negative ageHours.`);
+    }
+    return;
+  }
+
+  if (typeof entry.feedId !== 'string' || !feedIds.has(entry.feedId)) {
+    throw new Error(`Snapshot ${snapshotId} gap references unknown feed.`);
+  }
+  if (entry.status !== 'unavailable' || typeof entry.statusReason !== 'string') {
+    throw new Error(`Snapshot ${snapshotId} gap for ${entry.feedId} must be unavailable with a reason.`);
+  }
+}
+
 export function validateCatalog(value: unknown): SnapshotCatalog {
   if (!isRecord(value) || !isRecord(value.event) || !Array.isArray(value.snapshots)) {
     throw new Error('Catalog must contain an event and snapshots array.');
+  }
+  if (value.catalogFormat !== CATALOG_FORMAT) {
+    throw new Error(`Catalog format ${String(value.catalogFormat)} is not supported (expected ${CATALOG_FORMAT}).`);
   }
   if (typeof value.version !== 'string' || typeof value.updatedAt !== 'string') {
     throw new Error('Catalog version and updatedAt are required.');
@@ -24,6 +84,9 @@ export function validateCatalog(value: unknown): SnapshotCatalog {
   if (!Array.isArray(event.center) || event.center.length !== 2 || !Array.isArray(event.bounds) || event.bounds.length !== 4) {
     throw new Error('Catalog event center or bounds are invalid.');
   }
+
+  const feedIds = validateFeeds(value.feeds);
+  const assetIds = validateAssets(value.assets, feedIds);
 
   let previousTime = Number.NEGATIVE_INFINITY;
   const ids = new Set<string>();
@@ -41,13 +104,8 @@ export function validateCatalog(value: unknown): SnapshotCatalog {
     }
     previousTime = observedTime;
 
-    for (const layer of candidate.layers) {
-      if (!isRecord(layer) || typeof layer.id !== 'string' || typeof layer.status !== 'string') {
-        throw new Error(`Snapshot ${candidate.id} contains an invalid layer.`);
-      }
-      if (layer.status === 'ready' && typeof layer.url !== 'string' && !Array.isArray(layer.tiles)) {
-        throw new Error(`Ready layer ${layer.id} must provide url or tiles.`);
-      }
+    for (const entry of candidate.layers) {
+      validateLayerEntry(entry, candidate.id, feedIds, assetIds);
     }
   }
 
@@ -58,30 +116,39 @@ export class CatalogClient {
   private etag: string | null = null;
   private timer: number | null = null;
   private inFlight = false;
+  private pendingRefresh = false;
+  private pollIntervalMs = FALLBACK_POLL_MS;
   private refresh: (() => Promise<void>) | null = null;
 
   constructor(private readonly url: string) {}
 
   start(onCatalog: (catalog: SnapshotCatalog, meta: { stale: boolean }) => void, onError: (error: Error) => void): void {
-    const refresh = async () => {
-      if (this.inFlight) return;
+    const refresh = async (): Promise<void> => {
+      // A poll is already running; remember the request and re-run once it lands.
+      if (this.inFlight) {
+        this.pendingRefresh = true;
+        return;
+      }
       this.inFlight = true;
       try {
         const catalog = await this.fetchCatalog();
         if (catalog) {
+          this.pollIntervalMs = Math.max(MIN_POLL_MS, catalog.pollIntervalSeconds * 1_000);
           onCatalog(catalog, { stale: false });
-          this.schedule(catalog.pollIntervalSeconds * 1_000, refresh);
-        } else {
-          this.schedule(30_000, refresh);
         }
+        this.schedule(this.pollIntervalMs, refresh);
       } catch (error) {
         const normalized = error instanceof Error ? error : new Error(String(error));
         onError(normalized);
         const cached = this.readCache();
         if (cached) onCatalog(cached, { stale: true });
-        this.schedule(30_000, refresh);
+        this.schedule(this.pollIntervalMs, refresh);
       } finally {
         this.inFlight = false;
+        if (this.pendingRefresh) {
+          this.pendingRefresh = false;
+          void refresh();
+        }
       }
     };
     this.refresh = refresh;

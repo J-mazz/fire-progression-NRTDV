@@ -10,7 +10,9 @@
     "deploy:pages": "npm run build:pages && wrangler pages deploy dist --project-name fire-progression-nrtdv --branch main",
     "dev": "npm run build && node tools/dev_server.js",
     "typecheck": "tsc --noEmit",
-    "test": "node tests/run_tests.js"
+    "test": "node tests/run_tests.js",
+    "test:invariants": "node tests/run_tests.js invariants",
+    "test:fixture": "node tests/run_tests.js fixture"
   },
   "dependencies": {
     "@tmcw/togeojson": "^7.1.2",

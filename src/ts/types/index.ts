@@ -4,6 +4,9 @@ export type LayerKind = 'sentinel-raster' | 'sam-mask' | 'firms' | 'kml';
 export type LayerFormat = 'xyz' | 'image' | 'geojson' | 'kml';
 export type Bounds = [west: number, south: number, east: number, north: number];
 
+/** Wire-format revision of `catalog.json`; bumped on breaking shape changes. */
+export const CATALOG_FORMAT = 2;
+
 export interface EventConfiguration {
   id: string;
   name: string;
@@ -38,7 +41,55 @@ export interface FireBootstrap {
   baseImagery: BaseImagery | null;
 }
 
-export interface SnapshotLayer {
+/** Per-feed presentation, stored once instead of on every layer reference. */
+export interface FeedMeta {
+  label: string;
+  kind: LayerKind;
+  format?: LayerFormat;
+  contextType?: string;
+}
+
+/** One published observation. Every field here is frame-invariant. */
+export interface CatalogAsset {
+  feedId: string;
+  observedAt: string;
+  status: LayerStatus;
+  url?: string;
+  tiles?: string[];
+  bounds?: Bounds;
+  opacity?: number;
+  featureCount?: number;
+  cloudCoverPercent?: number;
+  composite?: string;
+  model?: string;
+  promptCount?: number;
+  sourceLagHours?: number;
+  attribution?: string;
+}
+
+/** A snapshot cites an asset and its age at that frame... */
+export interface AssetReference {
+  ref: string;
+  ageHours: number;
+}
+
+/** ...or records that a feed published nothing for the frame. */
+export interface FeedGap {
+  feedId: string;
+  status: 'unavailable';
+  statusReason: string;
+}
+
+export type SnapshotLayerEntry = AssetReference | FeedGap;
+
+export const isAssetReference = (entry: SnapshotLayerEntry): entry is AssetReference =>
+  typeof (entry as AssetReference).ref === 'string';
+
+/**
+ * A layer entry joined against `feeds` + `assets`. This is the flat shape the
+ * map and specifications panel consume; nothing downstream sees the wire format.
+ */
+export interface ResolvedLayer {
   id: string;
   label: string;
   kind: LayerKind;
@@ -61,21 +112,12 @@ export interface SnapshotLayer {
   attribution?: string;
 }
 
-export interface SnapshotSpecifications {
-  sourceIds?: string[];
-  cloudCoverPercent?: number;
-  samModel?: string;
-  notes?: string;
-}
-
 export interface Snapshot {
   id: string;
   observedAt: string;
-  publishedAt?: string;
   label: string;
   status: SnapshotStatus;
-  layers: SnapshotLayer[];
-  specifications?: SnapshotSpecifications;
+  layers: SnapshotLayerEntry[];
 }
 
 export interface TimelineConfig {
@@ -85,11 +127,14 @@ export interface TimelineConfig {
 }
 
 export interface SnapshotCatalog {
+  catalogFormat: number;
   version: string;
   updatedAt: string;
   pollIntervalSeconds: number;
   event: EventConfiguration;
   app?: AppConfig;
   timeline?: TimelineConfig;
+  feeds: Record<string, FeedMeta>;
+  assets: Record<string, CatalogAsset>;
   snapshots: Snapshot[];
 }

@@ -107,19 +107,25 @@ Feature parse_feature(simdjson::dom::object object) {
         if (error) feature.osm_id = 0;
     }
 
+    // A default-constructed dom::object holds a null tape; indexing one would
+    // dereference it. Overpass can emit untagged elements, so gate every lookup
+    // on having actually parsed a tags object.
     simdjson::dom::object tags;
+    bool has_tags = false;
     auto tags_result = object["tags"];
-    if (!tags_result.error()) {
-        const auto error = tags_result.get(tags);
-        if (error) tags = {};
+    if (!tags_result.error() && !tags_result.get(tags)) {
+        has_tags = true;
     }
+    const auto tag = [&](std::string_view key) -> std::string {
+        return has_tags ? string_field(tags, key) : std::string{};
+    };
 
-    const std::string highway = string_field(tags, "highway");
-    const std::string admin_level = string_field(tags, "admin_level");
-    const std::string natural = string_field(tags, "natural");
-    const std::string place = string_field(tags, "place");
-    const std::string water = string_field(tags, "water");
-    const std::string leisure = string_field(tags, "leisure");
+    const std::string highway = tag("highway");
+    const std::string admin_level = tag("admin_level");
+    const std::string natural = tag("natural");
+    const std::string place = tag("place");
+    const std::string water = tag("water");
+    const std::string leisure = tag("leisure");
 
     if (!highway.empty()) {
         feature.category = Category::roads;

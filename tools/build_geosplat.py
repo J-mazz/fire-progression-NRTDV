@@ -32,6 +32,8 @@ from rasterio.transform import from_bounds
 from rasterio.warp import reproject
 from PIL import Image
 
+from atomic_io import write_bytes_atomic, write_json_atomic
+
 MAGIC = 0x31505347  # 'GSP1'
 DEM_URL = (
     "https://copernicus-dem-30m.s3.amazonaws.com/"
@@ -119,14 +121,14 @@ def main():
 
     rgb, sentinel_name = latest_sentinel_rgb(args.sentinel_dir, grid)
 
-    args.output.mkdir(parents=True, exist_ok=True)
     splat_path = args.output / "terrain.splat"
     header = struct.pack("<IHHff", MAGIC, grid, grid, min_h, max_h)
-    with splat_path.open("wb") as handle:
-        handle.write(header)
-        handle.write(quantized.tobytes())
-        handle.write(rgb.tobytes())
-        handle.write(normal_xy.tobytes())
+    # Immutable asset first, then the metadata that points at it; both by rename,
+    # so a reader never sees a truncated splat.
+    write_bytes_atomic(
+        splat_path,
+        header + quantized.tobytes() + rgb.tobytes() + normal_xy.tobytes(),
+    )
 
     meta = {
         "version": 1,
@@ -139,7 +141,7 @@ def main():
         "demSource": "Copernicus GLO-30 DSM via AWS Open Data",
         "generatedAt": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
     }
-    (args.output / "meta.json").write_text(json.dumps(meta, indent=2) + "\n")
+    write_json_atomic(args.output / "meta.json", meta)
 
     size_mb = splat_path.stat().st_size / 1_048_576
     print(f"Wrote {splat_path} ({size_mb:.2f} MiB), heights {min_h:.0f}-{max_h:.0f} m, color from {sentinel_name}")

@@ -3,7 +3,6 @@ import argparse
 import json
 import math
 import os
-import shutil
 import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
@@ -16,6 +15,9 @@ from rasterio.features import shapes
 from rasterio.transform import from_bounds
 from rasterio.warp import Resampling, reproject
 from transformers import Sam2Model, Sam2Processor
+
+from atomic_io import publish_directory, staging_dir, write_json_atomic
+from sam2_encoder import DEFAULT_ENCODER_ONNX, build_encoder
 
 COMPOSITE_NAME = "B12/B8A/B04"
 COMPOSITE_ASSETS = ("swir22", "nir08", "red")
@@ -33,6 +35,14 @@ def parse_args():
     parser.add_argument(
         "--simplify-tolerance-m", type=float, default=None,
         help="Polygon simplification tolerance in meters; defaults to app.simplifyToleranceMeters or 15.",
+    )
+    parser.add_argument(
+        "--encoder-onnx", type=Path, default=DEFAULT_ENCODER_ONNX,
+        help="Exported SAM-2 image encoder run on the ONNX Runtime CUDA provider.",
+    )
+    parser.add_argument(
+        "--require-gpu", action="store_true",
+        help="Fail instead of falling back to the CPU encoder (use for the scheduled service).",
     )
     return parser.parse_args()
 
@@ -52,17 +62,31 @@ def _perp_distance(point, start, end):
 
 
 def _rdp(points, epsilon):
-    if len(points) < 3:
+    """Ramer-Douglas-Peucker over an explicit stack.
+
+    Dense masks can produce rings with thousands of vertices, which overruns
+    CPython's recursion limit when this is written recursively.
+    """
+    count = len(points)
+    if count < 3:
         return list(points)
-    start, end = points[0], points[-1]
-    index, dmax = 0, 0.0
-    for i in range(1, len(points) - 1):
-        distance = _perp_distance(points[i], start, end)
-        if distance > dmax:
-            index, dmax = i, distance
-    if dmax > epsilon:
-        return _rdp(points[: index + 1], epsilon)[:-1] + _rdp(points[index:], epsilon)
-    return [start, end]
+    keep = [False] * count
+    keep[0] = keep[count - 1] = True
+    stack = [(0, count - 1)]
+    while stack:
+        first, last = stack.pop()
+        if last <= first + 1:
+            continue
+        index, dmax = first, 0.0
+        for i in range(first + 1, last):
+            distance = _perp_distance(points[i], points[first], points[last])
+            if distance > dmax:
+                index, dmax = i, distance
+        if dmax > epsilon:
+            keep[index] = True
+            stack.append((first, index))
+            stack.append((index, last))
+    return [point for point, kept in zip(points, keep) if kept]
 
 
 def simplify_ring(ring, epsilon):
@@ -106,20 +130,44 @@ def iso(value):
     return datetime.fromisoformat(value.replace("Z", "+00:00"))
 
 
-def stac_search(bounds, start_at, end_at):
-    payload = json.dumps({
-        "collections": ["sentinel-2-l2a"],
-        "bbox": bounds,
-        "datetime": f"{start_at}/{end_at}",
-        "limit": 100,
-    }).encode()
+STAC_SEARCH_URL = "https://earth-search.aws.element84.com/v1/search"
+
+
+def _post_json(url, payload):
     request = urllib.request.Request(
-        "https://earth-search.aws.element84.com/v1/search",
-        data=payload,
+        url,
+        data=json.dumps(payload).encode(),
         headers={"Content-Type": "application/json", "User-Agent": "wildfire-nrtdv/0.1"},
     )
     with urllib.request.urlopen(request, timeout=90) as response:
-        return json.load(response)["features"]
+        return json.load(response)
+
+
+def stac_search(bounds, start_at, end_at, page_size=100, max_pages=25):
+    """Collect every matching scene, following STAC `next` links.
+
+    A single page silently truncates long events, which would drop Sentinel
+    scenes from the middle of a multi-week timeline.
+    """
+    payload = {
+        "collections": ["sentinel-2-l2a"],
+        "bbox": bounds,
+        "datetime": f"{start_at}/{end_at}",
+        "limit": page_size,
+    }
+    url = STAC_SEARCH_URL
+    features = []
+    for page in range(max_pages):
+        document = _post_json(url, payload)
+        features.extend(document.get("features", []))
+        next_link = next((link for link in document.get("links", []) if link.get("rel") == "next"), None)
+        # Element 84 paginates POST searches by echoing a token in the link body.
+        if not next_link or not next_link.get("body"):
+            return features
+        url = next_link.get("href", url)
+        payload = {**payload, **next_link["body"]}
+    print(f"Warning: STAC search stopped at {max_pages} pages ({len(features)} scenes); narrow the timeline.")
+    return features
 
 
 def scene_groups(items, cloud_max):
@@ -182,20 +230,6 @@ def feathered_overlay(image, edge_fraction=0.1):
     overlay = image.convert("RGBA")
     overlay.putalpha(Image.fromarray(alpha, "L"))
     return overlay
-
-
-def publish_directory(staging, destination):
-    backup = destination.with_name(f"{destination.name}.previous")
-    shutil.rmtree(backup, ignore_errors=True)
-    if destination.exists():
-        destination.rename(backup)
-    try:
-        staging.rename(destination)
-    except Exception:
-        if backup.exists() and not destination.exists():
-            backup.rename(destination)
-        raise
-    shutil.rmtree(backup, ignore_errors=True)
 
 
 def haversine_m(left, right):
@@ -307,12 +341,8 @@ def main():
 
     sentinel_dir = args.public_dir / "sentinel"
     sam_dir = args.public_dir / "sam2"
-    sentinel_staging = args.public_dir / "sentinel.next"
-    sam_staging = args.public_dir / "sam2.next"
-    shutil.rmtree(sentinel_staging, ignore_errors=True)
-    shutil.rmtree(sam_staging, ignore_errors=True)
-    sentinel_staging.mkdir(parents=True)
-    sam_staging.mkdir(parents=True)
+    sentinel_staging = staging_dir(sentinel_dir)
+    sam_staging = staging_dir(sam_dir)
 
     rendered = {}
     sentinel_observations = []
@@ -333,6 +363,20 @@ def main():
 
     processor = Sam2Processor.from_pretrained(args.model, token=hf_token)
     model = Sam2Model.from_pretrained(args.model, token=hf_token).eval()
+    encoder = build_encoder(model, args.encoder_onnx, require_gpu=args.require_gpu)
+
+    # The image encoder ignores prompts, so each Sentinel scene is encoded once
+    # and shared by every hotspot frame that resolves to it. Without this the
+    # encoder re-runs per frame on an identical image.
+    embeddings_by_scene = {}
+    for scene_key, (_, scene_image, _, _) in rendered.items():
+        pixel_values = processor(images=scene_image, return_tensors="pt")["pixel_values"]
+        embeddings_by_scene[scene_key] = encoder.encode(pixel_values)
+    print(
+        f"Encoded {len(embeddings_by_scene)} Sentinel scene(s) with the {encoder.name} backend "
+        f"for {len(firms)} hotspot frame(s)."
+    )
+
     sam_observations = []
     total_raw_vertices = 0
     total_kept_vertices = 0
@@ -345,10 +389,17 @@ def main():
         if not boxes:
             continue
         scene = select_scene(groups, frame_time)
-        _, image, transform, _ = rendered[scene["observedAt"].date().isoformat()]
+        scene_key = scene["observedAt"].date().isoformat()
+        _, image, transform, _ = rendered[scene_key]
         inputs = processor(images=image, input_boxes=[boxes], return_tensors="pt")
+        # pixel_values is deliberately withheld: passing it alongside
+        # image_embeddings would re-run the encoder we just cached.
         with torch.inference_mode():
-            outputs = model(**inputs, multimask_output=True)
+            outputs = model(
+                input_boxes=inputs["input_boxes"],
+                image_embeddings=embeddings_by_scene[scene_key],
+                multimask_output=True,
+            )
         processed = processor.post_process_masks(outputs.pred_masks.cpu(), inputs["original_sizes"])[0]
         scores = outputs.iou_scores.cpu()[0]
         selected_masks = []
@@ -379,7 +430,7 @@ def main():
     config["feeds"]["sentinel"]["observations"] = sentinel_observations
     config["feeds"]["sam2"]["observations"] = sam_observations
     config["updatedAt"] = datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
-    args.config.write_text(json.dumps(config, indent=2) + "\n")
+    write_json_atomic(args.config, config)
     reduction = (1 - total_kept_vertices / total_raw_vertices) * 100 if total_raw_vertices else 0.0
     print(
         f"Published {len(sentinel_observations)} Sentinel scenes and {len(sam_observations)} SAM-2 hotspot masks; "

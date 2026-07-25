@@ -1,7 +1,14 @@
 CompileFlags:
-  Add: [-std=c++26, -fmodules-ts, -xc++, -I src/cpp, -I src/generated]
-  Compiler: /usr/bin/g++-16
-  Remove: [-m64]
+  # clangd parses with clang, so GCC-only module flags must not appear here.
+  # simdjson resolves to the project-local prefix tools/native_env.sh exports.
+  Add:
+    - -std=c++26
+    - -xc++
+    - -I
+    - src/cpp
+    - -I
+    - .tools/simdjson/root/usr/include
+  Remove: [-m64, -fmodules-ts, -march=native]
 
 Diagnostics:
   Suppress: ['-Wunknown-warning-option', 'unknown-module']

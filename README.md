@@ -1,4 +1,4 @@
-# East Evans Creek Near-Real-Time Earth View
+# Wildfire Boundary Tracking with Near-Real-Time Data Visualization
 
 Live map of the East Evans Creek fire (started July 10, 2026). Open it and it works: no setup, no configuration, no account.
 
@@ -34,11 +34,10 @@ coordinates and timeline. When running locally (`npm run dev`):
 
 The same config file is the single source of truth for both the map and the pipeline.
 
-On the **deployed** site, **Save & rebuild** works for anyone: it calls a small Cloudflare
-Pages Function that fires a GitHub webhook to rebuild and redeploy with the new fire (no
-credentials ever touch the browser). Optionally gate it behind a passphrase. See
-[Deployment](docs/deployment.md). Either way, the map re-focuses immediately; the data
-layers appear once the pipeline has run for the new area.
+On the **deployed** site the Settings form is read-only: it offers **Copy config JSON** to
+carry the fire definition into the pipeline config. Live retargeting from the UI is
+developed separately in the
+[wildfire-boundary-tracker](https://github.com/J-mazz/wildfire-boundary-tracker) fork.
 
 ## Technical documentation
 

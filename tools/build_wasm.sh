@@ -23,7 +23,6 @@ common=(
   -O3
   -std=c++26
   -I "$PWD/src/cpp"
-  -I "$PWD/src/generated"
   -fprebuilt-module-path="$module_dir"
 )
 

@@ -7,12 +7,18 @@ interface TimelineCallbacks {
   onSpeedChange(): void;
 }
 
+const el = <T extends HTMLElement>(id: string): T => {
+  const node = document.getElementById(id);
+  if (!node) throw new Error(`Missing timeline element #${id}`);
+  return node as T;
+};
+
 export class TimelineController {
-  private readonly range = document.getElementById('timeline-range') as HTMLInputElement;
-  private readonly label = document.getElementById('timeline-label') as HTMLElement;
-  private readonly playButton = document.getElementById('play-button') as HTMLButtonElement;
-  private readonly liveButton = document.getElementById('live-button') as HTMLButtonElement;
-  private readonly speed = document.getElementById('playback-speed') as HTMLSelectElement;
+  private readonly range = el<HTMLInputElement>('timeline-range');
+  private readonly label = el<HTMLElement>('timeline-label');
+  private readonly playButton = el<HTMLButtonElement>('play-button');
+  private readonly liveButton = el<HTMLButtonElement>('live-button');
+  private readonly speed = el<HTMLSelectElement>('playback-speed');
 
   constructor(callbacks: TimelineCallbacks) {
     this.range.addEventListener('input', () => callbacks.onSelect(Number(this.range.value)));

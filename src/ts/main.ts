@@ -2,7 +2,8 @@ import { CatalogClient } from './network/CatalogClient';
 import { MapController } from './core/MapController';
 import { TimelineController } from './core/TimelineController';
 import { SettingsController } from './core/SettingsController';
-import type { FireBootstrap, Snapshot, SnapshotCatalog } from './types';
+import { resolveLayers } from './core/SnapshotLayers';
+import type { FireBootstrap, ResolvedLayer, Snapshot, SnapshotCatalog } from './types';
 import '../styles.css';
 
 const CATALOG_URL = './data/catalog.json';
@@ -138,13 +139,13 @@ function describeFreshness(snapshot: Snapshot): string {
   return `${Math.floor(ageHours / 24)}d old`;
 }
 
-function renderSpecifications(snapshot: Snapshot): void {
+function renderSpecifications(snapshot: Snapshot, layers: ResolvedLayer[]): void {
   observedElement.textContent = formatObservedAt(snapshot.observedAt);
   freshnessElement.textContent = describeFreshness(snapshot);
-  const readyLayers = snapshot.layers.filter((layer) => layer.status === 'ready');
-  const firmsLayers = snapshot.layers.filter((layer) => layer.kind === 'firms' && layer.status === 'ready');
-  const samLayers = snapshot.layers.filter((layer) => layer.kind === 'sam-mask' && layer.status === 'ready');
-  const firmsLayer = snapshot.layers.find((layer) => layer.kind === 'firms');
+  const readyLayers = layers.filter((layer) => layer.status === 'ready');
+  const firmsLayers = layers.filter((layer) => layer.kind === 'firms' && layer.status === 'ready');
+  const samLayers = layers.filter((layer) => layer.kind === 'sam-mask' && layer.status === 'ready');
+  const firmsLayer = layers.find((layer) => layer.kind === 'firms');
   const otherLayers = readyLayers.filter((layer) => layer.kind !== 'firms' && layer.kind !== 'sam-mask');
   const summaries = [
     ...otherLayers.map((layer) => layer.label),
@@ -162,7 +163,7 @@ function renderSpecifications(snapshot: Snapshot): void {
     : snapshot.status === 'processing' ? 'Processing' : 'Awaiting source data';
 }
 
-function sumFeatures(layers: Snapshot['layers']): number {
+function sumFeatures(layers: ResolvedLayer[]): number {
   return layers.reduce((total, layer) => total + (layer.featureCount ?? 0), 0);
 }
 
@@ -174,17 +175,18 @@ async function selectSnapshotByIndex(index: number): Promise<void> {
 
   selectedSnapshotId = snapshot.id;
   timeline.select(boundedIndex, snapshot);
-  renderSpecifications(snapshot);
+  const layers = resolveLayers(catalog, snapshot);
+  renderSpecifications(snapshot, layers);
   errorElement.hidden = true;
 
   try {
-    await mapController.renderSnapshot(snapshot);
+    await mapController.renderSnapshot(layers);
     errorElement.hidden = true;
     errorElement.textContent = '';
     if (!catalogStale) setStatus('Catalog current', 'ready');
     for (const adjacentIndex of [boundedIndex - 1, boundedIndex + 1]) {
       const adjacent = catalog.snapshots[adjacentIndex];
-      if (adjacent) mapController.prefetchSnapshot(adjacent);
+      if (adjacent) mapController.prefetchSnapshot(resolveLayers(catalog, adjacent));
     }
   } catch (error) {
     showError(error instanceof Error ? error.message : String(error));
@@ -231,11 +233,14 @@ function applyCatalog(nextCatalog: SnapshotCatalog, meta: { stale: boolean }): v
   }
   if (unchanged) return;
 
+  const reportFailure = (error: unknown): void => {
+    showError(error instanceof Error ? error.message : String(error));
+  };
   if (nextCatalog.app) {
     applyBranding(nextCatalog.app.title, nextCatalog.app.tagline);
-    void mapController.setBaseImagery(nextCatalog.app.baseImagery);
+    mapController.setBaseImagery(nextCatalog.app.baseImagery).catch(reportFailure);
   }
-  void mapController.setEvent(nextCatalog.event);
+  mapController.setEvent(nextCatalog.event).catch(reportFailure);
   timeline.setSnapshots(nextCatalog.snapshots);
 
   const preservedIndex = previousSelection

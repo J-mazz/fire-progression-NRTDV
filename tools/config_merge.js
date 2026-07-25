@@ -5,6 +5,22 @@ function isDivisorOf24(value) {
   return Number.isInteger(value) && value > 0 && 24 % value === 0;
 }
 
+/**
+ * Normalize user-supplied display text: drop control characters, collapse
+ * whitespace, clamp length.
+ *
+ * Markup characters are deliberately preserved. The frontend renders these via
+ * `textContent` and the bootstrap island is JSON-escaped, so stripping them
+ * buys no safety while corrupting legitimate names ("Bear & Fox Creek").
+ */
+function cleanText(value, maxLength = 160) {
+  return String(value ?? '')
+    .replace(/[\u0000-\u001f\u007f]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, maxLength);
+}
+
 /** Returns an error string, or null when the draft is valid. */
 function validateDraft(draft) {
   if (typeof draft !== 'object' || draft === null) return 'Body must be a JSON object.';
@@ -27,13 +43,19 @@ function validateDraft(draft) {
 
 /** Merge {event, app, timeline} onto an existing config, preserving feeds. */
 function mergeConfig(existing, draft) {
+  const app = { ...existing.app, ...draft.app };
+  app.title = cleanText(app.title);
+  app.tagline = cleanText(app.tagline);
+  if (app.baseImagery) {
+    app.baseImagery = { ...app.baseImagery, attribution: cleanText(app.baseImagery.attribution) };
+  }
   return {
     ...existing,
-    event: { ...existing.event, ...draft.event },
-    app: { ...existing.app, ...draft.app },
+    event: { ...existing.event, ...draft.event, name: cleanText(draft.event.name ?? existing.event.name) },
+    app,
     timeline: { ...draft.timeline },
     updatedAt: new Date().toISOString().replace(/\.\d{3}Z$/, 'Z')
   };
 }
 
-module.exports = { validateDraft, mergeConfig, isDivisorOf24 };
+module.exports = { validateDraft, mergeConfig, cleanText, isDivisorOf24 };

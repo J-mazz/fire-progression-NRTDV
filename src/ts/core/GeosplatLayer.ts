@@ -101,6 +101,7 @@ export class GeosplatLayer implements CustomLayerInterface {
   private map: maplibregl.Map | null = null;
   private program: WebGLProgram | null = null;
   private vao: WebGLVertexArrayObject | null = null;
+  private buffers: WebGLBuffer[] = [];
   private instanceCount = 0;
   private uniforms: Record<string, WebGLUniformLocation | null> = {};
   private mercOrigin: [number, number] = [0, 0];
@@ -176,6 +177,7 @@ export class GeosplatLayer implements CustomLayerInterface {
     gl.bindVertexArray(this.vao);
 
     const cornerBuffer = gl.createBuffer();
+    if (cornerBuffer) this.buffers.push(cornerBuffer);
     gl.bindBuffer(gl.ARRAY_BUFFER, cornerBuffer);
     gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 1, -1, -1, 1, 1, 1]), gl.STATIC_DRAW);
     const cornerLocation = gl.getAttribLocation(this.program, 'a_corner');
@@ -183,6 +185,7 @@ export class GeosplatLayer implements CustomLayerInterface {
     gl.vertexAttribPointer(cornerLocation, 2, gl.FLOAT, false, 0, 0);
 
     const instanceBuffer = gl.createBuffer();
+    if (instanceBuffer) this.buffers.push(instanceBuffer);
     gl.bindBuffer(gl.ARRAY_BUFFER, instanceBuffer);
     gl.bufferData(gl.ARRAY_BUFFER, this.instances, gl.STATIC_DRAW);
     const stride = this.floatsPerSplat * 4;
@@ -205,7 +208,9 @@ export class GeosplatLayer implements CustomLayerInterface {
     if (gl instanceof WebGL2RenderingContext) {
       if (this.program) gl.deleteProgram(this.program);
       if (this.vao) gl.deleteVertexArray(this.vao);
+      for (const buffer of this.buffers) gl.deleteBuffer(buffer);
     }
+    this.buffers = [];
     this.program = null;
     this.vao = null;
     this.map = null;
@@ -222,6 +227,13 @@ export class GeosplatLayer implements CustomLayerInterface {
     gl.uniform1f(this.uniforms['u_metersToMerc']!, this.metersToMerc);
     gl.uniform1f(this.uniforms['u_radiusMeters']!, this.radiusMeters);
 
+    // MapLibre's painter caches GL state, so anything changed here must be put
+    // back or the layers drawn after this one in the same frame inherit it.
+    const previousDepthTest = gl.getParameter(gl.DEPTH_TEST) as boolean;
+    const previousDepthFunc = gl.getParameter(gl.DEPTH_FUNC) as number;
+    const previousDepthMask = gl.getParameter(gl.DEPTH_WRITEMASK) as boolean;
+    const previousBlend = gl.getParameter(gl.BLEND) as boolean;
+
     gl.enable(gl.DEPTH_TEST);
     gl.depthFunc(gl.LEQUAL);
     gl.depthMask(true);
@@ -230,6 +242,11 @@ export class GeosplatLayer implements CustomLayerInterface {
     gl.bindVertexArray(this.vao);
     gl.drawArraysInstanced(gl.TRIANGLE_STRIP, 0, 4, this.instanceCount);
     gl.bindVertexArray(null);
+
+    if (previousBlend) gl.enable(gl.BLEND); else gl.disable(gl.BLEND);
+    if (previousDepthTest) gl.enable(gl.DEPTH_TEST); else gl.disable(gl.DEPTH_TEST);
+    gl.depthFunc(previousDepthFunc);
+    gl.depthMask(previousDepthMask);
   }
 
   setEnabled(enabled: boolean): void {

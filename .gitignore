@@ -49,7 +49,7 @@ __pycache__/
 /dist/
 /build/
 /public/wasm/
-/src/generated/
+/.wrangler/
 *.o
 *.obj
 *.a

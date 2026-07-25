@@ -2,8 +2,11 @@ import maplibregl, { GeoJSONSource, type RasterSourceSpecification } from 'mapli
 import { kml } from '@tmcw/togeojson';
 import type { Feature, FeatureCollection, Geometry, GeoJsonProperties } from 'geojson';
 import { GeosplatLayer } from './GeosplatLayer';
-import type { BaseImagery, Bounds, EventConfiguration, FireBootstrap, Snapshot, SnapshotLayer } from '../types';
+import type { BaseImagery, Bounds, EventConfiguration, FireBootstrap, ResolvedLayer } from '../types';
 import 'maplibre-gl/dist/maplibre-gl.css';
+
+/** Vector payloads are immutable per URL; cap the cache so long sessions cannot grow without bound. */
+const MAX_CACHED_COLLECTIONS = 48;
 
 const BASE_SOURCE = 'world-imagery';
 const BASE_LAYER = 'world-imagery';
@@ -150,10 +153,10 @@ export class MapController {
     this.raiseOverlays();
   }
 
-  async renderSnapshot(snapshot: Snapshot): Promise<void> {
+  async renderSnapshot(layers: ResolvedLayer[]): Promise<void> {
     await this.ready;
     const revision = ++this.renderRevision;
-    const readyLayers = snapshot.layers.filter((layer) => layer.status === 'ready');
+    const readyLayers = layers.filter((layer) => layer.status === 'ready');
     const sentinel = readyLayers.find((layer) => layer.kind === 'sentinel-raster');
     const samLayers = readyLayers.filter((layer) => layer.kind === 'sam-mask');
     const firmsLayers = readyLayers.filter((layer) => layer.kind === 'firms');
@@ -175,8 +178,8 @@ export class MapController {
     this.raiseOverlays();
   }
 
-  prefetchSnapshot(snapshot: Snapshot): void {
-    for (const layer of snapshot.layers) {
+  prefetchSnapshot(layers: ResolvedLayer[]): void {
+    for (const layer of layers) {
       if (layer.status === 'ready' && layer.url && layer.kind !== 'sentinel-raster') {
         void this.loadVectorData(layer).catch(() => undefined);
       }
@@ -188,7 +191,11 @@ export class MapController {
     if (enabled && !this.geosplat) {
       this.geosplatLoading ??= GeosplatLayer.load(this.errorHandler);
       this.geosplat = await this.geosplatLoading;
-      if (!this.geosplat) return false;
+      if (!this.geosplat) {
+        // Clear the memo so a transient fetch/decode failure does not disable 3D for the session.
+        this.geosplatLoading = null;
+        return false;
+      }
       const beforeId = CONTEXT_LINE_LAYERS.find((id) => this.map.getLayer(id));
       this.map.addLayer(this.geosplat, beforeId);
     }
@@ -363,7 +370,7 @@ export class MapController {
     });
   }
 
-  private setSentinel(layer: SnapshotLayer | undefined): void {
+  private setSentinel(layer: ResolvedLayer | undefined): void {
     const desiredId = layer?.id ?? null;
     if (desiredId === this.currentSentinelId) return;
     if (this.map.getLayer(LAYER_SENTINEL)) this.map.removeLayer(LAYER_SENTINEL);
@@ -402,7 +409,7 @@ export class MapController {
     this.currentSentinelId = desiredId;
   }
 
-  private async mergeLayerCollections(layers: SnapshotLayer[]): Promise<FeatureCollection> {
+  private async mergeLayerCollections(layers: ResolvedLayer[]): Promise<FeatureCollection> {
     if (layers.length === 0) return EMPTY_COLLECTION;
     const collections = await Promise.all(layers.map((layer) => this.loadVectorData(layer)));
     const features: Feature<Geometry, GeoJsonProperties>[] = [];
@@ -425,10 +432,15 @@ export class MapController {
     return { type: 'FeatureCollection', features };
   }
 
-  private loadVectorData(layer: SnapshotLayer): Promise<FeatureCollection> {
+  private loadVectorData(layer: ResolvedLayer): Promise<FeatureCollection> {
     if (!layer.url) return Promise.resolve(EMPTY_COLLECTION);
     const cached = this.dataCache.get(layer.url);
-    if (cached) return cached;
+    if (cached) {
+      // Map preserves insertion order; re-inserting marks this entry most-recently-used.
+      this.dataCache.delete(layer.url);
+      this.dataCache.set(layer.url, cached);
+      return cached;
+    }
     const pending = fetch(layer.url, { cache: 'no-cache' })
       .then(async (response) => {
         if (!response.ok) throw new Error(`Layer request returned ${response.status}: ${layer.url}`);
@@ -448,6 +460,11 @@ export class MapController {
         throw error;
       });
     this.dataCache.set(layer.url, pending);
+    while (this.dataCache.size > MAX_CACHED_COLLECTIONS) {
+      const oldest = this.dataCache.keys().next();
+      if (oldest.done) break;
+      this.dataCache.delete(oldest.value);
+    }
     return pending;
   }
 

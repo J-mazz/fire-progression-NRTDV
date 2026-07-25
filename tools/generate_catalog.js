@@ -1,5 +1,15 @@
+// Expands catalog.config.json into the served snapshot catalog.
+//
+// The wire format is normalized: frame-invariant observation metadata lives once
+// in `assets`, per-feed presentation lives once in `feeds`, and each snapshot
+// carries only thin references. `ageHours` is the sole per-frame value, so a
+// rolling window that repeats one observation across 56 frames costs 56 small
+// objects instead of 56 full copies. See docs/data-contract.md.
+
 const fs = require('node:fs');
 const path = require('node:path');
+
+const CATALOG_FORMAT = 2;
 
 const [configPath, outputPath] = process.argv.slice(2);
 if (!configPath || !outputPath) {
@@ -28,14 +38,16 @@ const feeds = Object.entries(config.feeds).map(([feedId, feed]) => {
   return { feedId, ...feed, observations };
 });
 
+const timeKey = (isoString) => isoString.replaceAll(':', '-').replace('.000Z', 'Z');
+
 function observationsForFrame(feed, frameTime) {
   if (feed.mode === 'window') {
     const observation = feed.observations.find((candidate) => candidate.timestamp === frameTime);
-    return observation ? [{ ...observation, ageHours: 0 }] : [];
+    return observation ? [{ observation, ageHours: 0 }] : [];
   }
   if (feed.mode === 'carry-forward') {
     const observation = feed.observations.findLast((candidate) => candidate.timestamp <= frameTime);
-    return observation ? [{ ...observation, ageHours: (frameTime - observation.timestamp) / 3_600_000 }] : [];
+    return observation ? [{ observation, ageHours: (frameTime - observation.timestamp) / 3_600_000 }] : [];
   }
   if (feed.mode === 'rolling-window') {
     if (!Number.isFinite(feed.persistenceHours) || feed.persistenceHours <= 0) {
@@ -43,36 +55,22 @@ function observationsForFrame(feed, frameTime) {
     }
     return feed.observations
       .filter((observation) => observation.timestamp <= frameTime)
-      .map((observation) => ({
-        ...observation,
-        ageHours: (frameTime - observation.timestamp) / 3_600_000
-      }))
-      .filter((observation) => observation.ageHours <= feed.persistenceHours);
+      .map((observation) => ({ observation, ageHours: (frameTime - observation.timestamp) / 3_600_000 }))
+      .filter((entry) => entry.ageHours <= feed.persistenceHours);
   }
   throw new Error(`Unsupported feed mode: ${feed.mode}`);
 }
 
-function layerForObservation(feed, observation) {
-  const freshness = feed.mode === 'rolling-window'
-    ? Math.max(0, 1 - observation.ageHours / feed.persistenceHours)
-    : 1;
+/** Frame-invariant description of one published observation. */
+function assetForObservation(feed, observation) {
   return {
-    id: `${feed.feedId}-${observation.observedAt.replaceAll(':', '-').replace('.000Z', 'Z')}`,
-    label: feed.label,
-    kind: feed.kind,
-    format: feed.format,
+    feedId: feed.feedId,
+    observedAt: observation.observedAt,
     status: observation.status ?? 'ready',
-    sourceObservedAt: observation.observedAt,
-    ...(feed.contextType ? { contextType: feed.contextType } : {}),
-    ageHours: Math.round(observation.ageHours * 100) / 100,
     ...(observation.url ? { url: observation.url } : {}),
     ...(observation.tiles ? { tiles: observation.tiles } : {}),
     ...(observation.bounds ? { bounds: observation.bounds } : {}),
-    ...(observation.opacity !== undefined
-      ? { opacity: observation.opacity }
-      : feed.mode === 'rolling-window'
-        ? { opacity: Math.round((0.18 + 0.77 * freshness) * 1000) / 1000 }
-        : {}),
+    ...(observation.opacity !== undefined ? { opacity: observation.opacity } : {}),
     ...(observation.featureCount !== undefined ? { featureCount: observation.featureCount } : {}),
     ...(observation.cloudCoverPercent !== undefined ? { cloudCoverPercent: observation.cloudCoverPercent } : {}),
     ...(observation.composite ? { composite: observation.composite } : {}),
@@ -85,40 +83,50 @@ function layerForObservation(feed, observation) {
 
 function outageForFrame(feed, frameTime) {
   return (feed.outages ?? []).find((outage) => {
-    const start = Date.parse(outage.startAt);
-    const end = Date.parse(outage.endAt);
-    return Number.isFinite(start) && Number.isFinite(end) && frameTime >= start && frameTime < end;
+    const outageStart = Date.parse(outage.startAt);
+    const outageEnd = Date.parse(outage.endAt);
+    return Number.isFinite(outageStart) && Number.isFinite(outageEnd) && frameTime >= outageStart && frameTime < outageEnd;
   });
 }
 
+const feedMeta = {};
+for (const feed of feeds) {
+  feedMeta[feed.feedId] = {
+    label: feed.label,
+    kind: feed.kind,
+    ...(feed.format ? { format: feed.format } : {}),
+    ...(feed.contextType ? { contextType: feed.contextType } : {})
+  };
+}
+
+const assets = {};
 const snapshots = [];
+
 for (let frameTime = start; frameTime <= end; frameTime += cadenceMs) {
   const observedAt = new Date(frameTime).toISOString();
   const layers = [];
 
   for (const feed of feeds) {
-    const observations = observationsForFrame(feed, frameTime);
-    if (observations.length > 0) {
-      for (const observation of observations) {
-        layers.push(layerForObservation(feed, observation));
+    const entries = observationsForFrame(feed, frameTime);
+    if (entries.length > 0) {
+      for (const { observation, ageHours } of entries) {
+        const assetId = `${feed.feedId}-${timeKey(observation.observedAt)}`;
+        assets[assetId] ??= assetForObservation(feed, observation);
+        layers.push({ ref: assetId, ageHours: Math.round(ageHours * 100) / 100 });
       }
     } else if (feed.mode === 'window' || feed.mode === 'rolling-window') {
       const outage = outageForFrame(feed, frameTime);
       layers.push({
-        id: `${feed.feedId}-${observedAt.replaceAll(':', '-').replace('.000Z', 'Z')}`,
-        label: feed.label,
-        kind: feed.kind,
-        format: feed.format,
+        feedId: feed.feedId,
         status: 'unavailable',
-        sourceObservedAt: observedAt,
-        statusReason: outage?.reason ?? 'No observations were published for this three-hour window.'
+        statusReason: outage?.reason ?? `No observations were published for this ${config.timeline.cadenceHours}-hour window.`
       });
     }
   }
 
-  const hasReadyLayer = layers.some((layer) => layer.status === 'ready');
+  const hasReadyLayer = layers.some((layer) => layer.ref && assets[layer.ref].status === 'ready');
   snapshots.push({
-    id: `${config.event.id}-${observedAt.replaceAll(':', '-').replace('.000Z', 'Z')}`,
+    id: `${config.event.id}-${timeKey(observedAt)}`,
     observedAt,
     label: `${new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' }).format(new Date(frameTime))} · ${observedAt.slice(11, 16)} UTC`,
     status: hasReadyLayer ? 'ready' : 'awaiting-data',
@@ -127,15 +135,25 @@ for (let frameTime = start; frameTime <= end; frameTime += cadenceMs) {
 }
 
 const catalog = {
+  catalogFormat: CATALOG_FORMAT,
   version: config.version,
   updatedAt: config.updatedAt,
   pollIntervalSeconds: config.pollIntervalSeconds,
   event: config.event,
   ...(config.app ? { app: config.app } : {}),
   timeline: config.timeline,
+  feeds: feedMeta,
+  assets,
   snapshots
 };
 
 fs.mkdirSync(path.dirname(outputPath), { recursive: true });
-fs.writeFileSync(outputPath, `${JSON.stringify(catalog, null, 2)}\n`);
-console.log(`Generated ${snapshots.length} snapshots at ${config.timeline.cadenceHours}-hour cadence.`);
+const temporaryPath = `${outputPath}.next`;
+fs.writeFileSync(temporaryPath, `${JSON.stringify(catalog, null, 2)}\n`);
+fs.renameSync(temporaryPath, outputPath);
+
+const layerCount = snapshots.reduce((total, snapshot) => total + snapshot.layers.length, 0);
+console.log(
+  `Generated ${snapshots.length} snapshots at ${config.timeline.cadenceHours}-hour cadence ` +
+  `(${Object.keys(assets).length} assets, ${layerCount} references).`
+);
